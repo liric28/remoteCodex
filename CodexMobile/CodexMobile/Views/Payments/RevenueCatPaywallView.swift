@@ -273,7 +273,7 @@ struct RevenueCatPaywallView: View {
             }
 
             if let error = errorMessage, !error.isEmpty {
-                Text(error)
+                Text(localizedAppMessage(error))
                     .font(AppFont.caption())
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.center)

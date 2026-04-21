@@ -214,13 +214,13 @@ struct SettingsView: View {
 
             if case .retrying(_, let message) = codex.connectionRecoveryState,
                !message.isEmpty {
-                Text(message)
+                Text(localizedAppMessage(message))
                     .font(AppFont.caption())
                     .foregroundStyle(.secondary)
             }
 
             if let error = codex.lastErrorMessage, !error.isEmpty {
-                Text(error)
+                Text(localizedAppMessage(error))
                     .font(AppFont.caption())
                     .foregroundStyle(.red)
             }
@@ -394,7 +394,7 @@ private struct SettingsSubscriptionCard: View {
             .disabled(subscriptions.isPurchasing)
 
             if let error = subscriptions.lastErrorMessage, !error.isEmpty {
-                Text(error)
+                Text(localizedAppMessage(error))
                     .font(AppFont.caption())
                     .foregroundStyle(.red)
             }

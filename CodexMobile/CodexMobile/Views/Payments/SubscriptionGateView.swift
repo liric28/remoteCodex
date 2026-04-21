@@ -329,7 +329,7 @@ struct SubscriptionGateView: View {
             .foregroundStyle(secondaryTextColor)
 
             if let error = errorMessage, !error.isEmpty {
-                Text(error)
+                Text(localizedAppMessage(error))
                     .font(AppFont.caption())
                     .foregroundStyle(.red.opacity(0.9))
                     .multilineTextAlignment(.center)
@@ -474,7 +474,7 @@ struct SubscriptionBootstrapFailureView: View {
                     }
 
                     if let error = subscriptions.lastErrorMessage, !error.isEmpty {
-                        Text(error)
+                        Text(localizedAppMessage(error))
                             .font(AppFont.caption())
                             .foregroundStyle(.red.opacity(0.9))
                             .multilineTextAlignment(.center)

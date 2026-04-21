@@ -68,7 +68,7 @@ struct HomeEmptyStateView<AuthSection: View, Footer: View>: View {
                 }
 
                 if let statusMessage, !statusMessage.isEmpty {
-                    Text(statusMessage)
+                    Text(localizedAppMessage(statusMessage))
                         .font(AppFont.caption())
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)

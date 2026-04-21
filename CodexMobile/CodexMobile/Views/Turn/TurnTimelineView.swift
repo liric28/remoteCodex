@@ -351,7 +351,7 @@ private struct TurnTimelineFooterContainer<Composer: View>: View {
     var body: some View {
         let footerContent = VStack(spacing: 0) {
             if !hidesErrorMessage, let errorMessage, !errorMessage.isEmpty {
-                Text(errorMessage)
+                Text(localizedAppMessage(errorMessage))
                     .font(AppFont.caption())
                     .foregroundStyle(.red)
                     .padding(.horizontal, 16)
