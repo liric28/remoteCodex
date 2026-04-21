@@ -641,7 +641,7 @@ struct TurnTimelineView<EmptyState: View, Composer: View>: View {
                 }
                 .onChange(of: shouldAnchorToAssistantResponse) { _, newValue in
                     if newValue {
-                        autoScrollMode = .anchorAssistantResponse
+                        resumeBottomFollowAfterSend(using: proxy)
                         handleTimelineMutation(using: proxy)
                     } else if autoScrollMode == .anchorAssistantResponse {
                         autoScrollMode = isScrolledToBottom ? .followBottom : .manual
@@ -795,6 +795,18 @@ struct TurnTimelineView<EmptyState: View, Composer: View>: View {
         isUserDraggingScroll = false
         userScrollCooldownUntil = nil
         scrollToBottom(using: proxy, animated: true)
+    }
+
+    // A local send should keep the newest message visible.  Older assistant-top
+    // anchoring could pull long chats upward as soon as the first assistant row arrived.
+    private func resumeBottomFollowAfterSend(using proxy: ScrollViewProxy) {
+        shouldAnchorToAssistantResponse = false
+        autoScrollMode = .followBottom
+        initialRecoverySnapPendingThreadID = nil
+        isUserDraggingScroll = false
+        userScrollCooldownUntil = nil
+        scrollToBottom(using: proxy, animated: true)
+        scheduleFollowBottomScroll(using: proxy)
     }
 
     // Resets per-thread scroll intent so each opened conversation gets one fresh
