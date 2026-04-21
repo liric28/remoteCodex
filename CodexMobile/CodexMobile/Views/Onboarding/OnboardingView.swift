@@ -30,8 +30,8 @@ struct OnboardingView: View {
                     OnboardingStepPage(
                         stepNumber: 1,
                         icon: "terminal",
-                        title: "Install Codex CLI",
-                        description: "The AI coding agent that lives in your terminal. Remodex connects to it from your iPhone.",
+                        title: L("Install Codex CLI", "安装 Codex CLI"),
+                        description: L("The AI coding agent that lives in your terminal. Remodex connects to it from your iPhone.", "运行在终端里的 AI 编码代理。Remodex 会从 iPhone 连接到它。"),
                         command: codexInstallCommand
                     )
                     .tag(2)
@@ -39,18 +39,18 @@ struct OnboardingView: View {
                     OnboardingStepPage(
                         stepNumber: 2,
                         icon: "link",
-                        title: "Install the Bridge",
-                        description: "A lightweight relay that securely connects your Mac to your iPhone.",
+                        title: L("Install the Bridge", "安装桥接"),
+                        description: L("A lightweight relay that securely connects your Mac to your iPhone.", "一个轻量级中继，用于安全连接你的 Mac 和 iPhone。"),
                         command: "npm install -g remodex@latest",
-                        commandCaption: "Remodex uses macOS caffeinate by default while the bridge is running so your Mac stays reachable even if the display turns off. You can change this later in Settings."
+                        commandCaption: L("Remodex uses macOS caffeinate by default while the bridge is running so your Mac stays reachable even if the display turns off. You can change this later in Settings.", "桥接运行时，Remodex 默认使用 macOS caffeinate，让 Mac 即使关闭显示器也保持可连接。你之后可以在设置中修改。")
                     )
                     .tag(3)
 
                     OnboardingStepPage(
                         stepNumber: 3,
                         icon: "qrcode.viewfinder",
-                        title: "Start Pairing",
-                        description: "Run this on your Mac. A QR code will appear in your terminal — scan it next.",
+                        title: L("Start Pairing", "开始配对"),
+                        description: L("Run this on your Mac. A QR code will appear in your terminal — scan it next.", "在 Mac 上运行此命令。终端中会出现二维码，下一步扫描它。"),
                         command: "remodex up"
                     )
                     .tag(4)
@@ -112,10 +112,10 @@ struct OnboardingView: View {
 
     private var buttonTitle: String {
         switch currentPage {
-        case 0: return "Get Started"
-        case 1: return "Set Up"
-        case pageCount - 1: return "Scan QR Code"
-        default: return "Continue"
+        case 0: return L("Get Started", "开始使用")
+        case 1: return L("Set Up", "开始设置")
+        case pageCount - 1: return L("Scan QR Code", "扫描二维码")
+        default: return L("Continue", "继续")
         }
     }
 

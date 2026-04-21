@@ -169,6 +169,7 @@ extension TurnViewModel {
             let gitService = GitActionsService(codex: codex, workingDirectory: workingDirectory)
             do {
                 let result = try await gitService.branchesWithStatus()
+                clearStaleGitRepositoryErrorIfNeeded(codex: codex)
                 applyGitBranchTargets(result)
                 if let status = result.status {
                     applyObservedGitRepoSync(
@@ -282,6 +283,7 @@ extension TurnViewModel {
             let gitService = GitActionsService(codex: codex, workingDirectory: workingDirectory)
             do {
                 let result = try await gitService.status()
+                clearStaleGitRepositoryErrorIfNeeded(codex: codex)
                 applyObservedGitRepoSync(
                     result,
                     codex: codex,

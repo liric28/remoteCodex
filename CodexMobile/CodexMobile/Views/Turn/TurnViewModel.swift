@@ -171,6 +171,15 @@ final class TurnViewModel {
     var gitDefaultBranch = ""
     var gitRepoSync: GitRepoSyncResult? = nil
     var gitSyncState: String? { gitRepoSync?.state }
+
+    func clearStaleGitRepositoryErrorIfNeeded(codex: CodexService) {
+        guard isGitRepositoryErrorMessage(codex.lastErrorMessage) else {
+            return
+        }
+
+        codex.lastErrorMessage = nil
+    }
+
     // Keeps PR creation tied to live Git state instead of chat-local remembered branch state.
     var createPullRequestValidationMessage: String? {
         guard let repoSync = gitRepoSync else {
@@ -203,6 +212,20 @@ final class TurnViewModel {
         return nil
     }
     var canCreatePullRequest: Bool { createPullRequestValidationMessage == nil }
+
+    private func isGitRepositoryErrorMessage(_ message: String?) -> Bool {
+        guard let message = message?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !message.isEmpty else {
+            return false
+        }
+
+        let lowered = message.lowercased()
+        return lowered.contains("not a git repository")
+            || lowered.contains("not in a git repository")
+            || lowered.contains("not inside a git repository")
+            || lowered.contains("must be run in a work tree")
+    }
+
     var localSelectableGitDefaultBranch: String? {
         remodexSelectableDefaultBranch(
             defaultBranch: gitDefaultBranch,

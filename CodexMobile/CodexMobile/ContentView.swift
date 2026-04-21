@@ -64,6 +64,7 @@ struct ContentView: View {
     private let sidebarOpenActivationWidth: CGFloat = 80
     private let sidebarPrewarmDelayNanoseconds: UInt64 = 700_000_000
     private let whatsNewPresentationDelayNanoseconds: UInt64 = 30_000_000_000
+    private let wakeMessageDismissDelayNanoseconds: UInt64 = 5_000_000_000
     private let sidebarGestureLogBucketWidth: CGFloat = 40
     private let sidebarSwipeCommitDistance: CGFloat = 30
     private let wakingSavedMacDisplayStatusMessage = "Trying to wake your Mac display..."
@@ -417,7 +418,7 @@ struct ContentView: View {
                 statusMessage: codex.lastErrorMessage,
                 securityLabel: codex.secureConnectionState.statusLabel,
                 trustedPairPresentation: codex.trustedPairPresentation,
-                offlinePrimaryButtonTitle: codex.hasReconnectCandidate ? "Reconnect" : "Scan QR Code",
+                offlinePrimaryButtonTitle: codex.hasReconnectCandidate ? L("Reconnect", "重新连接") : L("Scan QR Code", "扫描二维码"),
                 onPrimaryAction: {
                     if homeConnectionPhase == .offline && !codex.hasReconnectCandidate {
                         presentAutomaticScanner()
@@ -545,6 +546,7 @@ struct ContentView: View {
     // Resets the once-per-cycle wake gate after a fresh connection, pairing change, or app background.
     private func resetSavedMacWakeRecoveryState() {
         hasAttemptedAutomaticWakeSavedMacDisplay = false
+        clearSavedMacWakeMessageIfNeeded()
     }
 
     // Uses a temporary bridge request to wake display sleep, then unlocks the manual button only if that fails.
@@ -571,7 +573,47 @@ struct ContentView: View {
             }
         } catch {
             codex.lastErrorMessage = error.localizedDescription
+            scheduleSavedMacWakeMessageDismissIfNeeded(codex.lastErrorMessage)
         }
+    }
+
+    private func clearSavedMacWakeMessageIfNeeded() {
+        guard isSavedMacWakeMessage(codex.lastErrorMessage) else {
+            return
+        }
+
+        codex.lastErrorMessage = nil
+    }
+
+    private func scheduleSavedMacWakeMessageDismissIfNeeded(_ message: String?) {
+        guard isSavedMacWakeMessage(message) else {
+            return
+        }
+
+        Task { @MainActor in
+            do {
+                try await Task.sleep(nanoseconds: wakeMessageDismissDelayNanoseconds)
+            } catch {
+                return
+            }
+
+            if codex.lastErrorMessage == message {
+                codex.lastErrorMessage = nil
+            }
+        }
+    }
+
+    private func isSavedMacWakeMessage(_ message: String?) -> Bool {
+        guard let message = message?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !message.isEmpty else {
+            return false
+        }
+
+        let lowered = message.lowercased()
+        return message == wakingSavedMacDisplayStatusMessage
+            || lowered.contains("wake your mac display")
+            || lowered.contains("wake mac display")
+            || lowered.contains("mac display")
     }
 
     // MARK: - Sidebar Geometry
@@ -1177,12 +1219,12 @@ struct ContentView: View {
     // Keeps QR and code recovery as one quiet secondary row under the main reconnect CTA.
     private var reconnectSecondaryActions: some View {
         HStack(spacing: 10) {
-            secondaryReconnectActionButton("New QR Code") {
+            secondaryReconnectActionButton(L("New QR Code", "新的二维码")) {
                 presentManualScannerAfterStoppingReconnect()
             }
             .disabled(isPreparingManualScanner)
 
-            secondaryReconnectActionButton("Pair with Code") {
+            secondaryReconnectActionButton(L("Pair with Code", "使用配对码")) {
                 presentManualPairingEntryAfterStoppingReconnect()
             }
             .disabled(isPreparingManualScanner || isResolvingManualPairingCode)
@@ -1191,7 +1233,7 @@ struct ContentView: View {
 
     // Keeps the destructive saved-pair action visually separate from the reconnect controls.
     private var reconnectFooterAction: some View {
-        Button("Forget Pair") {
+        Button(L("Forget Pair", "忘记配对")) {
             codex.forgetReconnectCandidate()
         }
         .font(AppFont.caption(weight: .semibold))

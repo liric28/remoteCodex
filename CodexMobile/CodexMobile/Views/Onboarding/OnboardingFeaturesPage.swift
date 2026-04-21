@@ -28,32 +28,32 @@ struct OnboardingFeaturesPage: View {
                     featureRow(
                         icon: "hare.fill",
                         color: .yellow,
-                        title: "Fast mode",
-                        subtitle: "Lower-latency turns for quick interactions"
+                        title: L("Fast mode", "快速模式"),
+                        subtitle: L("Lower-latency turns for quick interactions", "低延迟回合，适合快速交互")
                     )
                     featureRow(
                         icon: "arrow.triangle.branch",
                         color: .green,
-                        title: "Git from your phone",
-                        subtitle: "Commit, push, pull, and switch branches"
+                        title: L("Git from your phone", "在手机上操作 Git"),
+                        subtitle: L("Commit, push, pull, and switch branches", "提交、推送、拉取和切换分支")
                     )
                     featureRow(
                         icon: "lock.shield.fill",
                         color: .cyan,
-                        title: "End-to-end encrypted",
-                        subtitle: "The relay never sees your prompts or code"
+                        title: L("End-to-end encrypted", "端到端加密"),
+                        subtitle: L("The relay never sees your prompts or code", "中继永远看不到你的提示词或代码")
                     )
                     featureRow(
                         icon: "waveform",
                         color: .purple,
-                        title: "Voice mode",
-                        subtitle: "Talk to Codex with speech-to-text"
+                        title: L("Voice mode", "语音模式"),
+                        subtitle: L("Talk to Codex with speech-to-text", "用语音转文字和 Codex 对话")
                     )
                     featureRow(
                         icon: "point.3.connected.trianglepath.dotted",
                         color: .orange,
-                        title: "Subagents, skills and /commands",
-                        subtitle: "Spawn and monitor parallel agents from your phone"
+                        title: L("Subagents, skills and /commands", "子代理、技能和 /命令"),
+                        subtitle: L("Spawn and monitor parallel agents from your phone", "从手机创建并监控并行代理")
                     )
                 }
                 .padding(.horizontal, 4)

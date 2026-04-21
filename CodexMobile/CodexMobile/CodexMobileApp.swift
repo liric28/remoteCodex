@@ -13,6 +13,7 @@ struct CodexMobileApp: App {
     @UIApplicationDelegateAdaptor(CodexMobileAppDelegate.self) private var appDelegate
     @State private var codexService: CodexService
     @State private var subscriptionService: SubscriptionService
+    @AppStorage(AppLanguage.storageKey) private var appLanguageRawValue = AppLanguage.system.rawValue
 
     init() {
         Self.configureRevenueCatIfAvailable()
@@ -27,6 +28,7 @@ struct CodexMobileApp: App {
             ContentView()
                 .environment(codexService)
                 .environment(subscriptionService)
+                .environment(\.locale, appLanguage.locale)
                 .task {
                     await subscriptionService.bootstrap()
                 }
@@ -50,6 +52,10 @@ struct CodexMobileApp: App {
                     TurnCacheManager.resetAll()
                 }
         }
+    }
+
+    private var appLanguage: AppLanguage {
+        AppLanguage(rawValue: appLanguageRawValue) ?? .system
     }
 
     // Configures RevenueCat once at launch using the client-safe public SDK key.

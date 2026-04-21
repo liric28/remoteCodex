@@ -306,6 +306,9 @@ struct TurnView: View {
             guard !isFocused else { return }
             viewModel.clearComposerAutocomplete()
         }
+        .onChange(of: gitWorkingDirectory) { _, _ in
+            viewModel.clearStaleGitRepositoryErrorIfNeeded(codex: codex)
+        }
         .onChange(of: renderSnapshot.repoRefreshSignal) { _, newValue in
             guard showsGitControls, newValue != nil else { return }
             viewModel.scheduleGitStatusRefresh(

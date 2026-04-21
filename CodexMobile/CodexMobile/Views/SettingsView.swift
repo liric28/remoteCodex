@@ -6,11 +6,52 @@
 import SwiftUI
 import UIKit
 
+private extension AppFont.Style {
+    var settingsTitle: String {
+        switch self {
+        case .system:
+            return L("System", "系统")
+        case .geist:
+            return "Geist"
+        case .geistMono:
+            return "Geist Mono"
+        case .jetBrainsMono:
+            return "JetBrains Mono"
+        }
+    }
+
+    var settingsSubtitle: String {
+        switch self {
+        case .system:
+            return L(
+                "Use the native iOS font for regular text. Code stays monospaced.",
+                "普通文本使用 iOS 原生字体，代码仍保持等宽字体。"
+            )
+        case .geist:
+            return L(
+                "Use Geist for regular text. Code stays monospaced.",
+                "普通文本使用 Geist，代码仍保持等宽字体。"
+            )
+        case .geistMono:
+            return L(
+                "Use Geist Mono for regular text and code.",
+                "普通文本和代码都使用 Geist Mono。"
+            )
+        case .jetBrainsMono:
+            return L(
+                "Use JetBrains Mono for regular text and code.",
+                "普通文本和代码都使用 JetBrains Mono。"
+            )
+        }
+    }
+}
+
 struct SettingsView: View {
     @Environment(CodexService.self) private var codex
     @Environment(SubscriptionService.self) private var subscriptions
 
     @AppStorage("codex.appFontStyle") private var appFontStyleRawValue = AppFont.defaultStoredStyleRawValue
+    @AppStorage(AppLanguage.storageKey) private var appLanguageRawValue = AppLanguage.system.rawValue
     @State private var isShowingMacNameSheet = false
 
     private let runtimeAutoValue = "__AUTO__"
@@ -21,7 +62,10 @@ struct SettingsView: View {
         ScrollView {
             VStack(spacing: 24) {
                 SettingsArchivedChatsCard()
-                SettingsAppearanceCard(appFontStyle: appFontStyleBinding)
+                SettingsAppearanceCard(
+                    appFontStyle: appFontStyleBinding,
+                    appLanguage: appLanguageBinding
+                )
                 SettingsNotificationsCard()
                 SettingsGPTAccountCard()
                 SettingsSubscriptionCard()
@@ -34,7 +78,7 @@ struct SettingsView: View {
             .padding()
         }
         .font(AppFont.body())
-        .navigationTitle("Settings")
+        .navigationTitle(L("Settings", "设置"))
         .sheet(isPresented: $isShowingMacNameSheet) {
             if let trustedPairPresentation = codex.trustedPairPresentation {
                 SettingsMacNameSheet(
@@ -59,6 +103,13 @@ struct SettingsView: View {
         )
     }
 
+    private var appLanguageBinding: Binding<AppLanguage> {
+        Binding(
+            get: { AppLanguage(rawValue: appLanguageRawValue) ?? .system },
+            set: { appLanguageRawValue = $0.rawValue }
+        )
+    }
+
     private var keepMacAwakeWhileBridgeRunsBinding: Binding<Bool> {
         Binding(
             get: { codex.keepMacAwakeWhileBridgeRuns },
@@ -74,12 +125,12 @@ struct SettingsView: View {
     // MARK: - Runtime defaults
 
     @ViewBuilder private var runtimeDefaultsSection: some View {
-        SettingsCard(title: "Runtime defaults") {
+        SettingsCard(title: L("Runtime defaults", "运行默认值")) {
             HStack {
-                Text("Model")
+                Text(L("Model", "模型"))
                 Spacer()
-                Picker("Model", selection: runtimeModelSelection) {
-                    Text("Auto").tag(runtimeAutoValue)
+                Picker(L("Model", "模型"), selection: runtimeModelSelection) {
+                    Text(L("Auto", "自动")).tag(runtimeAutoValue)
                     ForEach(runtimeModelOptions, id: \.id) { model in
                         Text(TurnComposerMetaMapper.modelTitle(for: model))
                             .tag(model.id)
@@ -91,10 +142,10 @@ struct SettingsView: View {
             }
 
             HStack {
-                Text("Reasoning")
+                Text(L("Reasoning", "推理强度"))
                 Spacer()
-                Picker("Reasoning", selection: runtimeReasoningSelection) {
-                    Text("Auto").tag(runtimeAutoValue)
+                Picker(L("Reasoning", "推理强度"), selection: runtimeReasoningSelection) {
+                    Text(L("Auto", "自动")).tag(runtimeAutoValue)
                     ForEach(runtimeReasoningOptions, id: \.id) { option in
                         Text(option.title).tag(option.effort)
                     }
@@ -106,10 +157,10 @@ struct SettingsView: View {
             }
 
             HStack {
-                Text("Speed")
+                Text(L("Speed", "速度"))
                 Spacer()
-                Picker("Speed", selection: runtimeServiceTierSelection) {
-                    Text("Normal").tag(runtimeNormalValue)
+                Picker(L("Speed", "速度"), selection: runtimeServiceTierSelection) {
+                    Text(L("Normal", "普通")).tag(runtimeNormalValue)
                     ForEach(CodexServiceTier.allCases, id: \.rawValue) { tier in
                         Text(tier.displayName).tag(tier.rawValue)
                     }
@@ -120,9 +171,9 @@ struct SettingsView: View {
             }
 
             HStack {
-                Text("Access")
+                Text(L("Access", "访问权限"))
                 Spacer()
-                Picker("Access", selection: runtimeAccessSelection) {
+                Picker(L("Access", "访问权限"), selection: runtimeAccessSelection) {
                     ForEach(CodexAccessMode.allCases, id: \.self) { mode in
                         Text(mode.displayName).tag(mode)
                     }
@@ -137,7 +188,7 @@ struct SettingsView: View {
     // MARK: - Connection
 
     @ViewBuilder private var connectionSection: some View {
-        SettingsCard(title: "Connection") {
+        SettingsCard(title: L("Connection", "连接")) {
             if let trustedPairPresentation = codex.trustedPairPresentation {
                 SettingsTrustedMacCard(
                     presentation: trustedPairPresentation,
@@ -147,7 +198,7 @@ struct SettingsView: View {
                     }
                 )
             } else {
-                Text("No paired Mac")
+                Text(L("No paired Mac", "未配对 Mac"))
                     .font(AppFont.subheadline(weight: .semibold))
                     .foregroundStyle(.primary)
             }
@@ -176,28 +227,28 @@ struct SettingsView: View {
 
             Divider()
 
-            Toggle("Keep Mac reachable", isOn: keepMacAwakeWhileBridgeRunsBinding)
+            Toggle(L("Keep Mac reachable", "保持 Mac 可连接"), isOn: keepMacAwakeWhileBridgeRunsBinding)
                 .tint(settingsAccentColor)
 
             Text(codex.keepMacAwakeWhileBridgeRuns
-                 ? "Uses macOS caffeinate while the bridge is running so your Mac stays reachable even if the display turns off. Best while charging."
-                 : "Your Mac can go back to sleeping normally when the bridge is idle.")
+                 ? L("Uses macOS caffeinate while the bridge is running so your Mac stays reachable even if the display turns off. Best while charging.", "桥接运行时使用 macOS caffeinate，让 Mac 即使关闭显示器也保持可连接。充电时使用最佳。")
+                 : L("Your Mac can go back to sleeping normally when the bridge is idle.", "桥接空闲时，Mac 可以恢复正常睡眠。"))
                 .font(AppFont.caption())
                 .foregroundStyle(.secondary)
 
             if !codex.isConnected {
-                Text("Saved on this iPhone. It will sync to your Mac the next time the bridge reconnects.")
+                Text(L("Saved on this iPhone. It will sync to your Mac the next time the bridge reconnects.", "已保存在这台 iPhone 上，下次桥接重连时会同步到 Mac。"))
                     .font(AppFont.caption())
                     .foregroundStyle(.secondary)
             }
 
             if codex.isConnected {
-                SettingsButton("Disconnect", role: .destructive) {
+                SettingsButton(L("Disconnect", "断开连接"), role: .destructive) {
                     HapticFeedback.shared.triggerImpactFeedback()
                     disconnectRelay()
                 }
             } else if codex.hasTrustedMacReconnectCandidate {
-                SettingsButton("Forget Pair", role: .destructive) {
+                SettingsButton(L("Forget Pair", "忘记配对"), role: .destructive) {
                     HapticFeedback.shared.triggerImpactFeedback()
                     codex.forgetTrustedMac()
                 }
@@ -217,26 +268,26 @@ struct SettingsView: View {
     private var connectionStatusLabel: String {
         switch codex.connectionPhase {
         case .offline:
-            return "offline"
+            return L("offline", "离线")
         case .connecting:
-            return "connecting"
+            return L("connecting", "连接中")
         case .loadingChats:
-            return "loading chats"
+            return L("loading chats", "加载会话中")
         case .syncing:
-            return "syncing"
+            return L("syncing", "同步中")
         case .connected:
-            return "connected"
+            return L("connected", "已连接")
         }
     }
 
     private var connectionProgressLabel: String {
         switch codex.connectionPhase {
         case .connecting:
-            return "Connecting to relay..."
+            return L("Connecting to relay...", "正在连接中继...")
         case .loadingChats:
-            return "Loading chats..."
+            return L("Loading chats...", "正在加载会话...")
         case .syncing:
-            return "Syncing workspace..."
+            return L("Syncing workspace...", "正在同步工作区...")
         case .offline, .connected:
             return ""
         }
@@ -315,27 +366,27 @@ private struct SettingsSubscriptionCard: View {
     var body: some View {
         SettingsCard(title: "Remodex Pro") {
             HStack {
-                Text("Status")
+                Text(L("Status", "状态"))
                 Spacer()
-                Text(subscriptions.hasProAccess ? "Active" : "Free")
+                Text(subscriptions.hasProAccess ? L("Active", "已激活") : L("Free", "免费版"))
                     .foregroundStyle(subscriptions.hasProAccess ? .green : .secondary)
             }
 
             if subscriptions.hasProAccess {
-                Text("Your Pro access is active. You can still restore purchases or manage the purchase from Apple.")
+                Text(L("Your Pro access is active. You can still restore purchases or manage the purchase from Apple.", "你的 Pro 权限已激活，仍可从 Apple 恢复购买或管理订阅。"))
                     .font(AppFont.caption())
                     .foregroundStyle(.secondary)
             } else {
-                Text("Open the custom paywall to choose a monthly, yearly, or lifetime plan.")
+                Text(L("Open the custom paywall to choose a monthly, yearly, or lifetime plan.", "打开自定义付费页，选择月付、年付或永久方案。"))
                     .font(AppFont.caption())
                     .foregroundStyle(.secondary)
             }
 
-            SettingsButton(subscriptions.hasProAccess ? "View Pro" : "Upgrade to Pro") {
+            SettingsButton(subscriptions.hasProAccess ? L("View Pro", "查看 Pro") : L("Upgrade to Pro", "升级到 Pro")) {
                 isPresentingPaywall = true
             }
 
-            SettingsButton(subscriptions.isRestoring ? "Restoring..." : "Restore Purchases", isLoading: subscriptions.isRestoring) {
+            SettingsButton(subscriptions.isRestoring ? L("Restoring...", "正在恢复...") : L("Restore Purchases", "恢复购买"), isLoading: subscriptions.isRestoring) {
                 Task {
                     await subscriptions.restorePurchases()
                 }
@@ -422,7 +473,7 @@ private struct SettingsUsageCard: View {
     @State private var isRefreshing = false
 
     var body: some View {
-        SettingsCard(title: "Usage") {
+        SettingsCard(title: L("Usage", "用量")) {
             UsageStatusSummaryContent(
                 contextWindowUsage: nil,
                 showsContextWindowSection: false,
@@ -430,7 +481,7 @@ private struct SettingsUsageCard: View {
                 isLoadingRateLimits: codex.isLoadingRateLimits,
                 rateLimitsErrorMessage: codex.rateLimitsErrorMessage,
                 refreshControl: UsageStatusRefreshControl(
-                    title: "Refresh",
+                    title: L("Refresh", "刷新"),
                     isRefreshing: isRefreshing,
                     action: refreshStatus
                 )
@@ -481,17 +532,18 @@ private struct SettingsUsageCard: View {
 
 private struct SettingsAppearanceCard: View {
     @Binding var appFontStyle: AppFont.Style
+    @Binding var appLanguage: AppLanguage
     @AppStorage("codex.useLiquidGlass") private var useLiquidGlass = true
     private let settingsAccentColor = Color(.plan)
 
     var body: some View {
-        SettingsCard(title: "Appearance") {
+        SettingsCard(title: L("Appearance", "外观")) {
             HStack {
-                Text("Font")
+                Text(L("Font", "字体"))
                 Spacer()
-                Picker("Font", selection: $appFontStyle) {
+                Picker(L("Font", "字体"), selection: $appFontStyle) {
                     ForEach(AppFont.Style.allCases) { style in
-                        Text(style.title).tag(style)
+                        Text(style.settingsTitle).tag(style)
                     }
                 }
                 .pickerStyle(.menu)
@@ -499,22 +551,52 @@ private struct SettingsAppearanceCard: View {
                 .tint(settingsAccentColor)
             }
 
-            Text(appFontStyle.subtitle)
+            Text(appFontStyle.settingsSubtitle)
+                .font(AppFont.caption())
+                .foregroundStyle(.secondary)
+
+            Divider()
+
+            HStack {
+                Text(L("Language", "语言"))
+                Spacer()
+                Picker(L("Language", "语言"), selection: $appLanguage) {
+                    ForEach(AppLanguage.allCases) { language in
+                        Text(language.title).tag(language)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .tint(settingsAccentColor)
+            }
+
+            Text(languageSubtitle)
                 .font(AppFont.caption())
                 .foregroundStyle(.secondary)
 
             if GlassPreference.isSupported {
                 Divider()
 
-                Toggle("Liquid Glass", isOn: $useLiquidGlass)
+                Toggle(L("Liquid Glass", "液态玻璃"), isOn: $useLiquidGlass)
                     .tint(settingsAccentColor)
 
                 Text(useLiquidGlass
-                     ? "Liquid Glass effects are enabled."
-                     : "Using solid material fallback.")
+                     ? L("Liquid Glass effects are enabled.", "已启用液态玻璃效果。")
+                     : L("Using solid material fallback.", "正在使用实体材质降级样式。"))
                     .font(AppFont.caption())
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private var languageSubtitle: String {
+        switch appLanguage {
+        case .system:
+            return L("Follow the iPhone system language.", "跟随 iPhone 系统语言。")
+        case .english:
+            return L("Use English for supported app pages.", "支持的应用页面会显示英文。")
+        case .chinese:
+            return L("Use Chinese for supported app pages.", "支持的应用页面会显示中文。")
         }
     }
 }
@@ -524,22 +606,22 @@ private struct SettingsNotificationsCard: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        SettingsCard(title: "Notifications") {
+        SettingsCard(title: L("Notifications", "通知")) {
             HStack(spacing: 10) {
                 Image(systemName: "bell.badge")
                     .foregroundStyle(.primary)
-                Text("Status")
+                Text(L("Status", "状态"))
                 Spacer()
                 Text(statusLabel)
                     .foregroundStyle(.secondary)
             }
 
-            Text("Used for local alerts when a run finishes while the app is in background.")
+            Text(L("Used for local alerts when a run finishes while the app is in background.", "应用在后台时，用于在任务完成后发送本地提醒。"))
                 .font(AppFont.caption())
                 .foregroundStyle(.secondary)
 
             if codex.notificationAuthorizationStatus == .notDetermined {
-                SettingsButton("Allow notifications") {
+                SettingsButton(L("Allow notifications", "允许通知")) {
                     HapticFeedback.shared.triggerImpactFeedback()
                     Task {
                         await codex.requestNotificationPermission()
@@ -548,7 +630,7 @@ private struct SettingsNotificationsCard: View {
             }
 
             if codex.notificationAuthorizationStatus == .denied {
-                SettingsButton("Open iOS Settings") {
+                SettingsButton(L("Open iOS Settings", "打开 iOS 设置")) {
                     HapticFeedback.shared.triggerImpactFeedback()
                     if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
                         UIApplication.shared.open(url)
@@ -571,12 +653,12 @@ private struct SettingsNotificationsCard: View {
 
     private var statusLabel: String {
         switch codex.notificationAuthorizationStatus {
-        case .authorized: "Authorized"
-        case .denied: "Denied"
-        case .provisional: "Provisional"
-        case .ephemeral: "Ephemeral"
-        case .notDetermined: "Not requested"
-        @unknown default: "Unknown"
+        case .authorized: L("Authorized", "已授权")
+        case .denied: L("Denied", "已拒绝")
+        case .provisional: L("Provisional", "临时授权")
+        case .ephemeral: L("Ephemeral", "临时")
+        case .notDetermined: L("Not requested", "尚未请求")
+        @unknown default: L("Unknown", "未知")
         }
     }
 }
@@ -585,7 +667,7 @@ private struct SettingsGPTAccountCard: View {
     @State private var isShowingMacLoginInfo = false
 
     var body: some View {
-        SettingsCard(title: "ChatGPT voice mode") {
+        SettingsCard(title: L("ChatGPT voice mode", "ChatGPT 语音模式")) {
             Button {
                 HapticFeedback.shared.triggerImpactFeedback(style: .light)
                 isShowingMacLoginInfo = true
@@ -593,7 +675,7 @@ private struct SettingsGPTAccountCard: View {
                 HStack(spacing: 8) {
                     Image(systemName: "info.circle")
                         .font(AppFont.subheadline(weight: .medium))
-                    Text("Info")
+                    Text(L("Info", "说明"))
                         .font(AppFont.subheadline(weight: .medium))
                     Spacer()
                     Image(systemName: "chevron.right")
@@ -621,21 +703,21 @@ private struct SettingsBridgeVersionCard: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        SettingsCard(title: "Bridge Version") {
+        SettingsCard(title: L("Bridge Version", "桥接版本")) {
             HStack(spacing: 10) {
-                Text("Status")
+                Text(L("Status", "状态"))
                 Spacer()
                 SettingsStatusPill(label: versionStatusLabel)
             }
 
             settingsVersionRow(
-                title: "Installed on Mac",
+                title: L("Installed on Mac", "Mac 已安装"),
                 value: installedVersionLabel,
                 valueStyle: installedValueStyle
             )
 
             settingsVersionRow(
-                title: "Latest available",
+                title: L("Latest available", "最新可用"),
                 value: latestVersionLabel,
                 valueStyle: .primary
             )
@@ -658,51 +740,51 @@ private struct SettingsBridgeVersionCard: View {
     }
 
     private var installedVersionLabel: String {
-        normalizedVersion(codex.bridgeInstalledVersion) ?? "Unknown"
+        normalizedVersion(codex.bridgeInstalledVersion) ?? L("Unknown", "未知")
     }
 
     private var latestVersionLabel: String {
-        normalizedVersion(codex.latestBridgePackageVersion) ?? "Unknown"
+        normalizedVersion(codex.latestBridgePackageVersion) ?? L("Unknown", "未知")
     }
 
     private var guidanceText: String? {
         guard let installedVersion else {
-            return "Connect to a Mac bridge to read the installed package version."
+            return L("Connect to a Mac bridge to read the installed package version.", "连接到 Mac 桥接后读取已安装的包版本。")
         }
 
         guard let latestVersion else {
-            return "Installed version detected. The latest published package is unavailable right now."
+            return L("Installed version detected. The latest published package is unavailable right now.", "已检测到安装版本，但当前无法获取最新发布包。")
         }
 
         if installedVersion == latestVersion {
-            return "The installed bridge matches the latest published package."
+            return L("The installed bridge matches the latest published package.", "已安装桥接与最新发布包一致。")
         }
 
         if installedVersion.compare(latestVersion, options: .numeric) == .orderedAscending {
-            return "A newer Remodex package is available on npm."
+            return L("A newer Remodex package is available on npm.", "npm 上有更新的 Remodex 包可用。")
         }
 
-        return "This Mac is running a different build than the current npm latest."
+        return L("This Mac is running a different build than the current npm latest.", "这台 Mac 正在运行与当前 npm latest 不同的构建。")
     }
 
     private var versionStatusLabel: String {
         guard let installedVersion else {
-            return "Unknown"
+            return L("Unknown", "未知")
         }
 
         guard let latestVersion else {
-            return "Installed"
+            return L("Installed", "已安装")
         }
 
         if installedVersion == latestVersion {
-            return "Up to date"
+            return L("Up to date", "已是最新")
         }
 
         if installedVersion.compare(latestVersion, options: .numeric) == .orderedAscending {
-            return "Update available"
+            return L("Update available", "有可用更新")
         }
 
-        return "Different build"
+        return L("Different build", "不同构建")
     }
 
     private var guidanceColor: Color {
@@ -763,12 +845,12 @@ private struct SettingsArchivedChatsCard: View {
     }
 
     var body: some View {
-        SettingsCard(title: "Archived Chats") {
+        SettingsCard(title: L("Archived Chats", "已归档会话")) {
             NavigationLink {
                 ArchivedChatsView()
             } label: {
                 HStack {
-                    Label("Archived Chats", systemImage: "archivebox")
+                    Label(L("Archived Chats", "已归档会话"), systemImage: "archivebox")
                         .font(AppFont.subheadline(weight: .medium))
                     Spacer()
                     if archivedCount > 0 {
@@ -790,8 +872,8 @@ private struct SettingsAboutCard: View {
     @State private var isShowingAbout = false
 
     var body: some View {
-        SettingsCard(title: "About") {
-            Text("Chats are End-to-end encrypted between your iPhone and Mac. The relay only sees ciphertext and connection metadata after the secure handshake completes.")
+        SettingsCard(title: L("About", "关于")) {
+            Text(L("Chats are End-to-end encrypted between your iPhone and Mac. The relay only sees ciphertext and connection metadata after the secure handshake completes.", "会话在 iPhone 和 Mac 之间端到端加密。安全握手完成后，中继只能看到密文和连接元数据。"))
                 .font(AppFont.caption())
                 .foregroundStyle(.secondary)
 
@@ -800,7 +882,7 @@ private struct SettingsAboutCard: View {
                 isShowingAbout = true
             } label: {
                 settingsAccessoryRow(
-                    title: "How Remodex Works",
+                    title: L("How Remodex Works", "Remodex 如何工作"),
                     leading: {
                         Image(systemName: "info.circle")
                             .font(AppFont.subheadline(weight: .medium))
@@ -816,7 +898,7 @@ private struct SettingsAboutCard: View {
                 }
             } label: {
                 settingsAccessoryRow(
-                    title: "Chat & Support",
+                    title: L("Chat & Support", "交流与支持"),
                     leading: {
                         Image("x-icon")
                             .renderingMode(.template)
@@ -833,7 +915,7 @@ private struct SettingsAboutCard: View {
                 UIApplication.shared.open(AppEnvironment.privacyPolicyURL)
             } label: {
                 settingsAccessoryRow(
-                    title: "Privacy Policy",
+                    title: L("Privacy Policy", "隐私政策"),
                     leading: {
                         Image(systemName: "hand.raised")
                             .font(AppFont.subheadline(weight: .medium))
@@ -847,7 +929,7 @@ private struct SettingsAboutCard: View {
                 UIApplication.shared.open(AppEnvironment.termsOfUseURL)
             } label: {
                 settingsAccessoryRow(
-                    title: "Terms of Use",
+                    title: L("Terms of Use", "使用条款"),
                     leading: {
                         Image(systemName: "doc.text")
                             .font(AppFont.subheadline(weight: .medium))
@@ -929,11 +1011,11 @@ private struct SettingsTrustedMacCard: View {
                         )
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Edit Mac name")
+                .accessibilityLabel(L("Edit Mac name", "编辑 Mac 名称"))
             }
 
             HStack(spacing: 8) {
-                SettingsStatusPill(label: connectionStatusLabel.capitalized)
+                SettingsStatusPill(label: connectionStatusLabel)
 
                 if let title = compactTitle {
                     SettingsStatusPill(label: title)
@@ -942,12 +1024,12 @@ private struct SettingsTrustedMacCard: View {
 
             if let systemName = presentation.systemName,
                !systemName.isEmpty {
-                labeledRow("System", value: systemName)
+                labeledRow(L("System", "系统"), value: systemName)
             }
 
             if let detail = presentation.detail,
                !detail.isEmpty {
-                labeledRow("Status", value: detail)
+                labeledRow(L("Status", "状态"), value: detail)
             }
         }
         .padding(14)
@@ -1011,7 +1093,7 @@ private struct SettingsMacNameSheet: View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Mac name")
+                    Text(L("Mac name", "Mac 名称"))
                         .font(AppFont.subheadline(weight: .semibold))
                         .foregroundStyle(.primary)
 
@@ -1031,19 +1113,19 @@ private struct SettingsMacNameSheet: View {
                             .fill(Color(.secondarySystemFill))
                     )
 
-                Text("This nickname stays on this iPhone and appears anywhere this Mac is shown.")
+                Text(L("This nickname stays on this iPhone and appears anywhere this Mac is shown.", "这个昵称只保存在这台 iPhone 上，并会显示在所有出现这台 Mac 的地方。"))
                     .font(AppFont.caption())
                     .foregroundStyle(.secondary)
 
                 VStack(spacing: 10) {
-                    SettingsButton("Use Default", role: .cancel) {
+                    SettingsButton(L("Use Default", "使用默认名称"), role: .cancel) {
                         nickname = ""
                         dismiss()
                     }
                     .opacity(canResetToDefault ? 1 : 0.5)
                     .disabled(!canResetToDefault)
 
-                    SettingsButton("Save") {
+                    SettingsButton(L("Save", "保存")) {
                         nickname = draftNickname
                         dismiss()
                     }
@@ -1056,11 +1138,11 @@ private struct SettingsMacNameSheet: View {
             .padding(20)
             .presentationDetents([.height(300)])
             .presentationDragIndicator(.visible)
-            .navigationTitle("Edit Mac Name")
+            .navigationTitle(L("Edit Mac Name", "编辑 Mac 名称"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") {
+                    Button(L("Close", "关闭")) {
                         dismiss()
                     }
                 }
