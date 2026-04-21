@@ -159,22 +159,16 @@ private struct PendingGitBranchOperationState {
 
 extension TurnViewModel {
     func refreshGitBranchTargets(codex: CodexService, workingDirectory: String?, threadID: String) {
-        gitBranchTargetsRefreshGeneration += 1
-        let refreshGeneration = gitBranchTargetsRefreshGeneration
+        guard !isLoadingGitBranchTargets else { return }
         isLoadingGitBranchTargets = true
 
         Task { @MainActor [weak self] in
             guard let self else { return }
-            defer {
-                if self.gitBranchTargetsRefreshGeneration == refreshGeneration {
-                    self.isLoadingGitBranchTargets = false
-                }
-            }
+            defer { self.isLoadingGitBranchTargets = false }
 
             let gitService = GitActionsService(codex: codex, workingDirectory: workingDirectory)
             do {
                 let result = try await gitService.branchesWithStatus()
-                guard self.gitBranchTargetsRefreshGeneration == refreshGeneration else { return }
                 applyGitBranchTargets(result)
                 if let status = result.status {
                     applyObservedGitRepoSync(

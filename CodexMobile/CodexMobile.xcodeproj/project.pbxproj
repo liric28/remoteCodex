@@ -385,7 +385,7 @@
 			mainGroup = C09A76A52F4B8D7B003B3F3A;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				C0DED3342F5E39DC0021A8E8 /* XCRemoteSwiftPackageReference "textual" */,
+				C0DED3342F5E39DC0021A8E8 /* XCLocalSwiftPackageReference "Vendor/textual" */,
 				C04E21492F71D34100AA3193 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -921,6 +921,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		C0DED3342F5E39DC0021A8E8 /* XCLocalSwiftPackageReference "Vendor/textual" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Vendor/textual;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		C04E21492F71D34100AA3193 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -928,14 +935,6 @@
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 5.66.0;
-			};
-		};
-		C0DED3342F5E39DC0021A8E8 /* XCRemoteSwiftPackageReference "textual" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/gonzalezreal/textual.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.3.1;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -948,7 +947,7 @@
 		};
 		C0DED3352F5E39DC0021A8E8 /* Textual */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = C0DED3342F5E39DC0021A8E8 /* XCRemoteSwiftPackageReference "textual" */;
+			package = C0DED3342F5E39DC0021A8E8 /* XCLocalSwiftPackageReference "Vendor/textual" */;
 			productName = Textual;
 		};
 /* End XCSwiftPackageProductDependency section */

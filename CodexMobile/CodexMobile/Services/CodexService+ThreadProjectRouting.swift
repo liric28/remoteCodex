@@ -211,31 +211,6 @@ extension CodexService {
         return true
     }
 
-    // Lets tool-call telemetry bind or repair local project paths from the cwd observed in execution events.
-    @discardableResult
-    func adoptObservedLocalProjectPathIfNeeded(threadId: String, projectPath: String?) -> Bool {
-        guard let normalizedThreadId = normalizedInterruptIdentifier(threadId),
-              let observedProjectPath = CodexThreadStartProjectBinding.normalizedProjectPath(projectPath),
-              var currentThread = thread(for: normalizedThreadId) else {
-            return false
-        }
-        if currentThread.isManagedWorktreeProject {
-            return false
-        }
-        if currentThread.normalizedProjectPath == observedProjectPath {
-            return false
-        }
-
-        currentThread.cwd = observedProjectPath
-        currentThread.updatedAt = Date()
-        upsertThread(currentThread)
-        rememberRepoRoot(observedProjectPath, forWorkingDirectory: observedProjectPath)
-        if activeThreadId == normalizedThreadId {
-            requestImmediateActiveThreadSync(threadId: normalizedThreadId)
-        }
-        return true
-    }
-
     // Some local runtimes reject the immediate worktree rebind until a rollout exists
     // for the new cwd. Keep the local project switch instead of bouncing the user back.
     func shouldAllowProjectRebindWithoutResume(_ error: Error) -> Bool {

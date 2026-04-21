@@ -957,12 +957,7 @@ extension CodexService {
             threadId: context.threadId,
             isCompleted: false
         )
-        appendCommandExecutionOutputToDetails(
-            itemId: context.itemId,
-            threadId: context.threadId,
-            paramsObject: paramsObject,
-            eventObject: eventObject
-        )
+        appendCommandExecutionOutputToDetails(itemId: context.itemId, paramsObject: paramsObject, eventObject: eventObject)
         publishCommandExecutionStatus(
             context: context,
             statusText: statusText,
@@ -1468,12 +1463,7 @@ extension CodexService {
                 if commandExecutionDetailsByItemID[itemId] == nil {
                     upsertCommandExecutionDetails(from: state, threadId: threadId, isCompleted: false)
                 }
-                appendCommandExecutionOutputToDetails(
-                    itemId: itemId,
-                    threadId: threadId,
-                    paramsObject: normalizedParams,
-                    eventObject: payload
-                )
+                appendCommandExecutionOutputToDetails(itemId: itemId, paramsObject: normalizedParams, eventObject: payload)
 
                 let hasExistingRunRow = messagesByThread[threadId]?.contains(where: { message in
                     message.role == .system
@@ -2277,18 +2267,7 @@ extension CodexService {
     ) {
         guard let itemId = state.itemId, !itemId.isEmpty else { return }
         if let threadId {
-            var hasInferredCommandProjectPath = false
-            if let commandProjectPath = inferredProjectPath(fromCommand: state.fullCommand) {
-                hasInferredCommandProjectPath = true
-                adoptObservedLocalProjectPathIfNeeded(
-                    threadId: threadId,
-                    projectPath: commandProjectPath
-                )
-            }
-            if !hasInferredCommandProjectPath,
-               !adoptManagedWorktreeProjectPathIfNeeded(threadId: threadId, projectPath: state.cwd) {
-                adoptObservedLocalProjectPathIfNeeded(threadId: threadId, projectPath: state.cwd)
-            }
+            adoptManagedWorktreeProjectPathIfNeeded(threadId: threadId, projectPath: state.cwd)
         }
         if var existing = commandExecutionDetailsByItemID[itemId] {
             if state.fullCommand.count > existing.fullCommand.count {
@@ -2311,81 +2290,13 @@ extension CodexService {
         }
     }
 
-    private func appendCommandExecutionOutputToDetails(
-        itemId: String?,
-        threadId: String? = nil,
-        paramsObject: IncomingParamsObject,
-        eventObject: IncomingParamsObject?
-    ) {
+    private func appendCommandExecutionOutputToDetails(itemId: String?, paramsObject: IncomingParamsObject, eventObject: IncomingParamsObject?) {
         guard let itemId, !itemId.isEmpty else { return }
         guard let chunk = commandExecutionOutputChunk(paramsObject: paramsObject, eventObject: eventObject),
               !chunk.isEmpty else { return }
         guard var details = commandExecutionDetailsByItemID[itemId] else { return }
         details.appendOutput(chunk)
         commandExecutionDetailsByItemID[itemId] = details
-        inferCommandOutputProjectPathIfNeeded(threadId: threadId, details: details)
-    }
-
-    private func inferCommandOutputProjectPathIfNeeded(threadId: String?, details: CommandExecutionDetails) {
-        guard let threadId, !threadId.isEmpty else { return }
-        let command = unwrapShellCommandIfPresent(details.fullCommand).lowercased()
-        let outputTail = details.outputTail
-        let hasGitRootProbe = command.contains("git rev-parse --show-toplevel")
-        let hasExplicitGitRootLabel = outputTail.range(of: "git root:", options: [.caseInsensitive]) != nil
-            || outputTail.range(of: "remodex-git-root:", options: [.caseInsensitive]) != nil
-        guard hasGitRootProbe || hasExplicitGitRootLabel else { return }
-        guard let projectPath = inferredProjectPath(fromCommandOutput: outputTail, acceptsPlainPathLine: hasGitRootProbe) else {
-            return
-        }
-        adoptObservedLocalProjectPathIfNeeded(threadId: threadId, projectPath: projectPath)
-    }
-
-    private func inferredProjectPath(fromCommand rawCommand: String) -> String? {
-        let command = unwrapShellCommandIfPresent(rawCommand)
-        let patterns = [
-            #"(?i)(?:^|[;&|]\s*)cd\s+(['"]?)(/Users/[^;&|'" ]+)\1"#,
-            #"(?i)(?:^|\s)git\s+-C\s+(['"]?)(/Users/[^;&|'" ]+)\1"#,
-        ]
-        for pattern in patterns {
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
-            let range = NSRange(command.startIndex..<command.endIndex, in: command)
-            guard let match = regex.firstMatch(in: command, range: range),
-                  match.numberOfRanges > 2,
-                  let pathRange = Range(match.range(at: 2), in: command) else {
-                continue
-            }
-            let path = String(command[pathRange]).trimmingCharacters(in: .whitespacesAndNewlines)
-            if path.hasPrefix("/Users/") {
-                return path
-            }
-        }
-        return nil
-    }
-
-    private func inferredProjectPath(fromCommandOutput output: String, acceptsPlainPathLine: Bool) -> String? {
-        let lines = output.components(separatedBy: .newlines)
-        for rawLine in lines.reversed() {
-            let trimmedLine = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmedLine.isEmpty else { continue }
-            let lowercasedLine = trimmedLine.lowercased()
-            if let path = pathSuffix(after: "remodex-git-root:", in: trimmedLine, lowercasedLine: lowercasedLine) {
-                return path
-            }
-            if let path = pathSuffix(after: "git root:", in: trimmedLine, lowercasedLine: lowercasedLine) {
-                return path
-            }
-            if acceptsPlainPathLine, trimmedLine.hasPrefix("/Users/") {
-                return trimmedLine
-            }
-        }
-        return nil
-    }
-
-    private func pathSuffix(after marker: String, in line: String, lowercasedLine: String) -> String? {
-        guard let range = lowercasedLine.range(of: marker) else { return nil }
-        let suffix = line[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
-        guard suffix.hasPrefix("/Users/") else { return nil }
-        return suffix
     }
 
     // Mirrors toolbar push resets for successful `git push` commands executed by the agent.

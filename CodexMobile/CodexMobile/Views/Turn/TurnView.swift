@@ -314,14 +314,6 @@ struct TurnView: View {
                 threadID: thread.id
             )
         }
-        .onChange(of: gitWorkingDirectory) { oldValue, newValue in
-            guard codex.isConnected, oldValue != newValue, newValue != nil else { return }
-            viewModel.refreshGitBranchTargets(
-                codex: codex,
-                workingDirectory: newValue,
-                threadID: thread.id
-            )
-        }
         .onChange(of: renderSnapshot.timelineChangeToken) { _, _ in
             viewModel.reconcileDismissedStructuredPlanPrompts(messages: renderSnapshot.messages, codex: codex)
         }

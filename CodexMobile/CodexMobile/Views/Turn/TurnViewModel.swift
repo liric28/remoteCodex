@@ -160,7 +160,6 @@ final class TurnViewModel {
     var isShowingNothingToCommitAlert = false
     var gitSyncAlert: TurnGitSyncAlert? = nil
     var isLoadingGitBranchTargets = false
-    var gitBranchTargetsRefreshGeneration = 0
     var isSwitchingGitBranch = false
     var isCreatingGitWorktree = false
     var selectedGitBaseBranch = ""
