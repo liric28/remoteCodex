@@ -8,6 +8,93 @@ import SwiftUI
 
 // ─── Diff Classification ────────────────────────────────────────────
 
+struct TurnDiffLineNumbers: Equatable {
+    let old: Int?
+    let new: Int?
+}
+
+enum TurnDiffLineNumberParser {
+    // Computes old/new line numbers from unified diff hunks so diff views can render
+    // stable gutters without needing the original file contents.
+    static func parse(code: String) -> [TurnDiffLineNumbers] {
+        let lines = code.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var result: [TurnDiffLineNumbers] = []
+        result.reserveCapacity(lines.count)
+
+        var oldLine: Int?
+        var newLine: Int?
+
+        for line in lines {
+            let kind = TurnDiffLineKind.classify(line)
+
+            switch kind {
+            case .meta:
+                result.append(TurnDiffLineNumbers(old: nil, new: nil))
+            case .hunk:
+                let range = parseHunkHeader(line)
+                oldLine = range?.oldStart
+                newLine = range?.newStart
+                result.append(TurnDiffLineNumbers(old: nil, new: nil))
+            case .addition:
+                result.append(TurnDiffLineNumbers(old: nil, new: newLine))
+                if newLine != nil {
+                    selfIncrement(&newLine)
+                }
+            case .deletion:
+                result.append(TurnDiffLineNumbers(old: oldLine, new: nil))
+                if oldLine != nil {
+                    selfIncrement(&oldLine)
+                }
+            case .neutral:
+                let isNoNewlineMarker = line.hasPrefix("\\ No newline at end of file")
+                result.append(
+                    TurnDiffLineNumbers(
+                        old: isNoNewlineMarker ? nil : oldLine,
+                        new: isNoNewlineMarker ? nil : newLine
+                    )
+                )
+                if !isNoNewlineMarker {
+                    if oldLine != nil {
+                        selfIncrement(&oldLine)
+                    }
+                    if newLine != nil {
+                        selfIncrement(&newLine)
+                    }
+                }
+            }
+        }
+
+        return result
+    }
+
+    private struct HunkRange: Equatable {
+        let oldStart: Int
+        let newStart: Int
+    }
+
+    private static func parseHunkHeader(_ line: String) -> HunkRange? {
+        let pattern = #"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return nil
+        }
+        let nsRange = NSRange(line.startIndex..<line.endIndex, in: line)
+        guard let match = regex.firstMatch(in: line, range: nsRange),
+              match.numberOfRanges >= 3,
+              let oldRange = Range(match.range(at: 1), in: line),
+              let newRange = Range(match.range(at: 2), in: line),
+              let oldStart = Int(String(line[oldRange])),
+              let newStart = Int(String(line[newRange])) else {
+            return nil
+        }
+        return HunkRange(oldStart: oldStart, newStart: newStart)
+    }
+
+    private static func selfIncrement(_ value: inout Int?) {
+        guard let current = value else { return }
+        value = current + 1
+    }
+}
+
 enum TurnDiffLineKind {
     case addition
     case deletion
@@ -158,10 +245,14 @@ struct TurnDiffCodeBlockView: View {
         code.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
     }
 
+    private var lineNumbers: [TurnDiffLineNumbers] {
+        TurnDiffLineNumberParser.parse(code: code)
+    }
+
     // ─── ENTRY POINT ─────────────────────────────────────────────
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+            ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
                 let kind = TurnDiffLineKind.classify(line)
                 if kind != .meta {
                     ZStack(alignment: .leading) {
@@ -174,6 +265,10 @@ struct TurnDiffCodeBlockView: View {
                             Rectangle()
                                 .fill(kind.indicatorColor)
                                 .frame(width: (showsLineIndicator && kind.hasIndicator) ? 2 : 0)
+
+                            TurnDiffLineNumberGutter(
+                                numbers: lineNumbers[safe: index] ?? TurnDiffLineNumbers(old: nil, new: nil)
+                            )
 
                             Text(verbatim: line)
                                 .font(AppFont.mono(.callout))
@@ -202,9 +297,13 @@ struct CleanDiffCodeBlockView: View {
         code.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
     }
 
+    private var lineNumbers: [TurnDiffLineNumbers] {
+        TurnDiffLineNumberParser.parse(code: code)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+            ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
                 let kind = TurnDiffLineKind.classify(line)
                 switch kind {
                 case .meta:
@@ -223,6 +322,10 @@ struct CleanDiffCodeBlockView: View {
                             Rectangle()
                                 .fill(kind.indicatorColor)
                                 .frame(width: kind.hasIndicator ? 2 : 0)
+
+                            TurnDiffLineNumberGutter(
+                                numbers: lineNumbers[safe: index] ?? TurnDiffLineNumbers(old: nil, new: nil)
+                            )
 
                             Text(verbatim: displayText)
                                 .font(AppFont.mono(.callout))
@@ -253,5 +356,33 @@ struct CleanDiffCodeBlockView: View {
         default:
             return line
         }
+    }
+}
+
+private struct TurnDiffLineNumberGutter: View {
+    let numbers: TurnDiffLineNumbers
+
+    var body: some View {
+        HStack(spacing: 8) {
+            numberText(numbers.old)
+            numberText(numbers.new)
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 8)
+        .frame(minWidth: 76, alignment: .trailing)
+    }
+
+    private func numberText(_ value: Int?) -> some View {
+        Text(value.map(String.init) ?? "")
+            .font(AppFont.mono(.caption))
+            .foregroundStyle(.secondary)
+            .frame(minWidth: 24, alignment: .trailing)
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        guard indices.contains(index) else { return nil }
+        return self[index]
     }
 }

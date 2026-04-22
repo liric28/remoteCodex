@@ -1312,8 +1312,9 @@ struct MessageRow: View, Equatable {
 
         return Button {
             guard presentation.isEnabled else { return }
+            guard let revertTargetMessage = assistantBlockAccessoryState?.blockRevertTargetMessage else { return }
             HapticFeedback.shared.triggerImpactFeedback(style: .light)
-            assistantRevertAction?(message)
+            assistantRevertAction?(revertTargetMessage)
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: iconName)

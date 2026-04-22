@@ -12,6 +12,7 @@ struct AssistantBlockAccessoryState: Equatable {
     let blockDiffText: String?
     let blockDiffEntries: [TurnFileChangeSummaryEntry]?
     let blockRevertPresentation: AssistantRevertPresentation?
+    let blockRevertTargetMessage: CodexMessage?
 }
 
 // ─── Tool Burst Projection ─────────────────────────────────────
@@ -1196,10 +1197,16 @@ struct TurnTimelineView<EmptyState: View, Composer: View>: View {
             let blockDiffEntries = blockDiffPresentation?.entries
 
             // Use the last assistant revert presentation in this block.
-            let blockRevert = messages[blockStart...blockEnd]
+            let blockRevertEntry = messages[blockStart...blockEnd]
                 .reversed()
-                .compactMap { revertStatesByMessageID[$0.id] }
+                .compactMap { message in
+                    revertStatesByMessageID[message.id].map { presentation in
+                        (message, presentation)
+                    }
+                }
                 .first
+            let blockRevertTargetMessage = blockRevertEntry?.0
+            let blockRevert = blockRevertEntry?.1
 
             if copyText != nil || showsRunningIndicator || blockDiffEntries != nil || blockRevert != nil {
                 result[blockEnd] = AssistantBlockAccessoryState(
@@ -1207,7 +1214,8 @@ struct TurnTimelineView<EmptyState: View, Composer: View>: View {
                     showsRunningIndicator: showsRunningIndicator,
                     blockDiffText: blockDiffText,
                     blockDiffEntries: blockDiffEntries,
-                    blockRevertPresentation: blockRevert
+                    blockRevertPresentation: blockRevert,
+                    blockRevertTargetMessage: blockRevertTargetMessage
                 )
             }
             i = blockStart - 1
