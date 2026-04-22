@@ -322,9 +322,9 @@ struct TurnGitBranchPickerSheet: View {
 
                 if orderedBranches.isEmpty {
                     ContentUnavailableView(
-                        "No branches found",
+                        L("No branches found", "未找到分支"),
                         systemImage: "arrow.triangle.branch",
-                        description: Text("Try a different search or refresh the branch list.")
+                        description: Text(L("Try a different search or refresh the branch list.", "试试其他搜索词，或刷新分支列表。"))
                     )
                     .frame(maxWidth: .infinity, alignment: .center)
                     .listRowBackground(Color.clear)
@@ -338,7 +338,13 @@ struct TurnGitBranchPickerSheet: View {
                             onCreateBranch(suggestedCreateBranchName)
                             dismiss()
                         } label: {
-                            Label("Create and checkout '\(suggestedCreateBranchName)'", systemImage: "plus")
+                            Label(
+                                L(
+                                    "Create and checkout '\(suggestedCreateBranchName)'",
+                                    "创建并切换到 '\(suggestedCreateBranchName)'"
+                                ),
+                                systemImage: "plus"
+                            )
                         }
                         .disabled(isLoading || isSwitching)
                     }
@@ -348,7 +354,7 @@ struct TurnGitBranchPickerSheet: View {
                         newBranchName = fromSearch.isEmpty ? "remodex/" : fromSearch
                         isShowingCreateBranchPrompt = true
                     } label: {
-                        Label("New branch...", systemImage: "plus")
+                        Label(L("New branch...", "新建分支..."), systemImage: "plus")
                     }
                     .disabled(isLoading || isSwitching)
                 }
@@ -359,9 +365,9 @@ struct TurnGitBranchPickerSheet: View {
                     onRefresh()
                 } label: {
                     if isSwitching {
-                        Text("Switching...")
+                        Text(L("Switching...", "切换中..."))
                     } else {
-                        Text(isLoading ? "Refreshing..." : "Reload branch list")
+                        Text(isLoading ? L("Refreshing...", "刷新中...") : L("Reload branch list", "重新加载分支列表"))
                     }
                 }
                 .disabled(isLoading || isSwitching)
@@ -372,13 +378,13 @@ struct TurnGitBranchPickerSheet: View {
         .listStyle(.insetGrouped)
         .listSectionSpacing(.compact)
         .environment(\.defaultMinListRowHeight, 28)
-        .searchable(text: $searchText, prompt: "Search branches")
-        .alert("New branch", isPresented: $isShowingCreateBranchPrompt) {
-            TextField("remodex/my-feature", text: $newBranchName)
-            Button("Cancel", role: .cancel) {
+        .searchable(text: $searchText, prompt: L("Search branches", "搜索分支"))
+        .alert(L("New branch", "新建分支"), isPresented: $isShowingCreateBranchPrompt) {
+            TextField(L("remodex/my-feature", "remodex/我的功能"), text: $newBranchName)
+            Button(L("Cancel", "取消"), role: .cancel) {
                 newBranchName = ""
             }
-            Button("Create") {
+            Button(L("Create", "创建")) {
                 let branchName = remodexNormalizedCreatedBranchName(newBranchName)
                 guard !branchName.isEmpty else { return }
                 onCreateBranch(branchName)
@@ -387,7 +393,10 @@ struct TurnGitBranchPickerSheet: View {
             }
             .disabled(!isNewBranchNameValid)
         } message: {
-            Text("Branch will be created locally and checked out. Uncommitted changes stay with this working copy.")
+            Text(L(
+                "Branch will be created locally and checked out. Uncommitted changes stay with this working copy.",
+                "分支会在本地创建并切换过去。未提交的改动会保留在当前工作副本中。"
+            ))
         }
     }
 }

@@ -284,7 +284,7 @@ private struct TurnTimelineRowsSection: View {
             HStack(spacing: 8) {
                 ProgressView()
                     .controlSize(.small)
-                Text("Loading recent messages...")
+                Text(L("Loading recent messages...", "正在加载最近消息..."))
                     .font(AppFont.caption())
                     .foregroundStyle(.secondary)
             }
@@ -293,7 +293,7 @@ private struct TurnTimelineRowsSection: View {
 
         if hasEarlierMessages {
             Button(action: onLoadEarlierMessages) {
-                Text("Load earlier messages")
+                Text(L("Load earlier messages", "加载更早消息"))
                     .font(AppFont.subheadline())
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)

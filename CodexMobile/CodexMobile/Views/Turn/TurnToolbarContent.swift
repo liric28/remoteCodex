@@ -81,7 +81,7 @@ struct TurnToolbarContent: ToolbarContent {
                     } label: {
                         HStack(spacing: 10) {
                             ResizableThreadActionSymbol(systemName: "arrow.left.arrow.right", pointSize: 13)
-                            Text("Hand off to Mac")
+                            Text(L("Hand off to Mac", "交接到 Mac"))
                         }
                     }
                     .disabled(!canTapMacHandoff)
@@ -111,7 +111,7 @@ struct TurnToolbarContent: ToolbarContent {
                 } label: {
                     TurnMacHandoffToolbarLabel(isLoading: isThreadActionLoading)
                 }
-                .accessibilityLabel("Thread actions")
+                .accessibilityLabel(L("Thread actions", "会话操作"))
             }
         }
 

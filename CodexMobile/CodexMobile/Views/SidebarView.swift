@@ -33,6 +33,7 @@ struct SidebarView: View {
     @State private var lastDiffFingerprint: Int = 0
     @State private var lastBadgeFingerprint: Int = 0
     @State private var sidebarDebugSequence = 0
+    @State private var isOpeningSettings = false
 
     var body: some View {
         let diffTotalsByThreadID = cachedDiffTotals
@@ -97,7 +98,11 @@ struct SidebarView: View {
             }
 
             HStack(spacing: 10) {
-                SidebarFloatingSettingsButton(colorScheme: colorScheme, action: openSettings)
+                SidebarFloatingSettingsButton(
+                    colorScheme: colorScheme,
+                    isDisabled: isOpeningSettings,
+                    action: openSettings
+                )
                 Spacer(minLength: 0)
                 if let trustedPairPresentation = codex.trustedPairPresentation {
                     SidebarMacConnectionStatusView(
@@ -142,6 +147,9 @@ struct SidebarView: View {
         }
         .onChange(of: isVisible) { _, visible in
             debugSidebarLog("visibility changed visible=\(visible)")
+            if !visible {
+                isOpeningSettings = false
+            }
         }
         .overlay {
             if SidebarThreadsLoadingPresentation.shouldShowOverlay(
@@ -299,6 +307,8 @@ struct SidebarView: View {
     }
 
     private func openSettings() {
+        guard !isOpeningSettings else { return }
+        isOpeningSettings = true
         searchText = ""
         showSettings = true
         onClose()

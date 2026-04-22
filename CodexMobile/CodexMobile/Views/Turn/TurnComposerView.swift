@@ -56,6 +56,7 @@ struct TurnComposerView: View {
     let onSelectGitBaseBranch: (String) -> Void
     let onRefreshGitBranches: () -> Void
     let onRefreshUsageStatus: () async -> Void
+    let onRefreshAccount: () async -> Void
 
     let onSelectAccessMode: (CodexAccessMode) -> Void
     let canHandOffToWorktree: Bool
@@ -114,7 +115,7 @@ struct TurnComposerView: View {
 
                 ZStack(alignment: .topLeading) {
                     if input.isEmpty {
-                        Text("Ask anything... @files, $skills, /commands")
+                        Text(L("Ask anything... @files, $skills, /commands", "随便问点什么... @文件, $技能, /命令"))
                             .font(AppFont.body())
                             .foregroundStyle(Color(.placeholderText))
                             .allowsHitTesting(false)
@@ -235,6 +236,7 @@ struct TurnComposerView: View {
                 onSelectGitBaseBranch: onSelectGitBaseBranch,
                 onRefreshGitBranches: onRefreshGitBranches,
                 onRefreshUsageStatus: onRefreshUsageStatus,
+                onRefreshAccount: onRefreshAccount,
                 onSelectAccessMode: onSelectAccessMode,
                 canHandOffToWorktree: canHandOffToWorktree,
                 onTapCreateWorktree: onTapCreateWorktree
@@ -542,6 +544,7 @@ private struct QueuedDraftsPanelPreviewWrapper: View {
                 onSelectGitBaseBranch: { _ in },
                 onRefreshGitBranches: {},
                 onRefreshUsageStatus: {},
+                onRefreshAccount: {},
                 onSelectAccessMode: { _ in },
                 canHandOffToWorktree: false,
                 onTapAddImage: {},

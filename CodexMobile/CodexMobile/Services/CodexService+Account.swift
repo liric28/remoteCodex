@@ -288,6 +288,22 @@ extension CodexService {
         gptAccountErrorMessage = nil
     }
 
+    // Restarts the local Codex runtime on the Mac so Remodex picks up a freshly switched account.
+    func refreshGPTAccountSessionOnMac() async {
+        guard isConnected else {
+            gptAccountErrorMessage = CodexServiceError.disconnected.localizedDescription
+            return
+        }
+
+        do {
+            _ = try await sendRequest(method: "account/refreshOnMac", params: nil)
+            gptAccountErrorMessage = nil
+            await refreshGPTAccountState()
+        } catch {
+            gptAccountErrorMessage = error.localizedDescription
+        }
+    }
+
     // Keeps the account card honest when voice auth proves the bridge token is no longer usable.
     func markGPTVoiceReauthenticationRequired() {
         stopGPTLoginSync()

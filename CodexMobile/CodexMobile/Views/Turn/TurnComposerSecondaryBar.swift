@@ -36,6 +36,7 @@ struct TurnComposerSecondaryBar: View {
     let onSelectGitBaseBranch: (String) -> Void
     let onRefreshGitBranches: () -> Void
     let onRefreshUsageStatus: () async -> Void
+    let onRefreshAccount: () async -> Void
     let onSelectAccessMode: (CodexAccessMode) -> Void
     let canHandOffToWorktree: Bool
     let onTapCreateWorktree: () -> Void
@@ -184,7 +185,8 @@ struct TurnComposerSecondaryBar: View {
             isLoadingRateLimits: isLoadingRateLimits,
             rateLimitsErrorMessage: rateLimitsErrorMessage,
             shouldAutoRefreshStatus: shouldAutoRefreshUsageStatus,
-            onRefreshStatus: onRefreshUsageStatus
+            onRefreshStatus: onRefreshUsageStatus,
+            onRefreshAccount: onRefreshAccount
         )
     }
 }

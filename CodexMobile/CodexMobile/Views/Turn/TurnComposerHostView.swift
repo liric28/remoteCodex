@@ -144,6 +144,10 @@ struct TurnComposerHostView: View {
             onRefreshUsageStatus: {
                 await codex.refreshUsageStatus(threadId: thread.id)
             },
+            onRefreshAccount: {
+                await codex.refreshGPTAccountSessionOnMac()
+                await codex.refreshUsageStatus(threadId: thread.id)
+            },
             onSelectAccessMode: codex.setSelectedAccessMode,
             canHandOffToWorktree: isGitBranchSelectorEnabled
                 && !isWorktreeProject

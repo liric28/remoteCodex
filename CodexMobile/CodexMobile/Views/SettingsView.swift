@@ -60,7 +60,7 @@ struct SettingsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
+            LazyVStack(spacing: 24) {
                 SettingsArchivedChatsCard()
                 SettingsAppearanceCard(
                     appFontStyle: appFontStyleBinding,
@@ -77,6 +77,7 @@ struct SettingsView: View {
             }
             .padding()
         }
+        .id("settings-language-\(appLanguageRawValue)")
         .font(AppFont.body())
         .navigationTitle(L("Settings", "设置"))
         .sheet(isPresented: $isShowingMacNameSheet) {

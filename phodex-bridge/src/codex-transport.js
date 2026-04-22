@@ -32,6 +32,8 @@ function createSpawnTransport({ env, appPath, spawnImpl = spawn }) {
   let stderrBuffer = "";
   let didRequestShutdown = false;
   let didReportError = false;
+  let pendingRestart = null;
+  let restartingChild = null;
   const listeners = createListenerBag();
 
   spawnNextLaunch();
@@ -64,14 +66,20 @@ function createSpawnTransport({ env, appPath, spawnImpl = spawn }) {
       didRequestShutdown = true;
       shutdownCodexProcess(codex);
     },
+    restart() {
+      return restartTransport();
+    },
   };
 
   // Retries the launch once with the bundled desktop binary when the shell-visible
   // `codex` command is unavailable in daemon environments like launchd.
   function spawnNextLaunch() {
+    didRequestShutdown = false;
+    didReportError = false;
     launchIndex += 1;
     activeLaunch = launchPlans[launchIndex] || null;
     if (!activeLaunch) {
+      rejectPendingRestart(new Error("Codex restart failed: no launch command is available."));
       return;
     }
 
@@ -87,6 +95,7 @@ function createSpawnTransport({ env, appPath, spawnImpl = spawn }) {
         return;
       }
 
+      resolvePendingRestart();
       listeners.emitStarted({
         mode: "spawn",
         launchDescription: launch.description,
@@ -106,6 +115,11 @@ function createSpawnTransport({ env, appPath, spawnImpl = spawn }) {
       listeners.emitError(error);
     });
     child.on("close", (code, signal) => {
+      if (pendingRestart && child === restartingChild) {
+        spawnReplacementAfterRestart();
+        return;
+      }
+
       if (child !== codex) {
         return;
       }
@@ -164,6 +178,67 @@ function createSpawnTransport({ env, appPath, spawnImpl = spawn }) {
         }
       }
     });
+  }
+
+  function restartTransport() {
+    if (pendingRestart) {
+      return pendingRestart.promise;
+    }
+
+    let resolveRestart;
+    let rejectRestart;
+    const promise = new Promise((resolve, reject) => {
+      resolveRestart = resolve;
+      rejectRestart = reject;
+    });
+
+    pendingRestart = {
+      promise,
+      resolve: resolveRestart,
+      reject: rejectRestart,
+    };
+
+    launchIndex = -1;
+    restartingChild = codex;
+
+    if (!restartingChild || restartingChild.killed || restartingChild.exitCode !== null) {
+      spawnReplacementAfterRestart();
+      return promise;
+    }
+
+    didRequestShutdown = true;
+    didReportError = false;
+    shutdownCodexProcess(restartingChild);
+    return promise;
+  }
+
+  function spawnReplacementAfterRestart() {
+    if (!pendingRestart) {
+      return;
+    }
+
+    restartingChild = null;
+    spawnNextLaunch();
+  }
+
+  function resolvePendingRestart() {
+    if (!pendingRestart) {
+      return;
+    }
+
+    pendingRestart.resolve();
+    pendingRestart = null;
+    restartingChild = null;
+  }
+
+  function rejectPendingRestart(error) {
+    if (!pendingRestart) {
+      return;
+    }
+
+    pendingRestart.reject(error);
+    pendingRestart = null;
+    restartingChild = null;
   }
 }
 
@@ -322,6 +397,9 @@ function createWebSocketTransport({ endpoint, WebSocketImpl = WebSocket }) {
       if (socket.readyState === openState || socket.readyState === connectingState) {
         socket.close();
       }
+    },
+    restart() {
+      return Promise.reject(new Error("The active Codex transport does not support restart."));
     },
   };
 }

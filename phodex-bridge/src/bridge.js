@@ -132,6 +132,7 @@ function startBridge({
   let lastConnectionStatus = null;
   let codexLaunchState = config.codexEndpoint ? "connected" : "starting";
   let codexHandshakeState = config.codexEndpoint ? "warm" : "cold";
+  let lastInitializeParams = null;
   const forwardedInitializeRequestIds = new Set();
   const bridgeManagedCodexRequestWaiters = new Map();
   const forwardedRequestMethodsById = new Map();
@@ -553,6 +554,7 @@ function startBridge({
     if (method !== "account/status/read"
       && method !== "getAuthStatus"
       && method !== "account/login/openOnMac"
+      && method !== "account/refreshOnMac"
       && method !== "voice/resolveAuth") {
       return false;
     }
@@ -582,6 +584,8 @@ function startBridge({
         return readSanitizedAuthStatus();
       case "account/login/openOnMac":
         return openPendingAuthLoginOnMac(params);
+      case "account/refreshOnMac":
+        return refreshCodexAccountSessionOnMac();
       case "voice/resolveAuth":
         return resolveVoiceAuth(sendCodexRequest);
       default:
@@ -639,6 +643,62 @@ function startBridge({
       success: true,
       openedOnMac: true,
     };
+  }
+
+  // Restarts the local Codex app-server so the bridge re-reads the current desktop login state.
+  async function refreshCodexAccountSessionOnMac() {
+    if (typeof codex.restart !== "function") {
+      const error = new Error("This Remodex bridge build does not support refreshing the local Codex runtime.");
+      error.errorCode = "unsupported_bridge";
+      throw error;
+    }
+
+    if (codex.mode !== "spawn") {
+      const error = new Error("Refreshing the account is only supported when Remodex owns the local Codex runtime.");
+      error.errorCode = "unsupported_transport";
+      throw error;
+    }
+
+    failBridgeManagedCodexRequests(new Error("The local Codex runtime is restarting."));
+    codexLaunchState = "starting";
+    codexHandshakeState = "cold";
+    publishBridgeStatus({
+      state: "running",
+      connectionStatus: lastConnectionStatus || "connected",
+      pid: process.pid,
+      lastError: "",
+    });
+
+    await codex.restart();
+    await primeCodexHandshakeAfterRestart();
+
+    return {
+      success: true,
+      accountStatus: await readSanitizedAuthStatus(),
+    };
+  }
+
+  async function primeCodexHandshakeAfterRestart() {
+    if (codex.mode !== "spawn") {
+      codexHandshakeState = "warm";
+      return;
+    }
+
+    if (!lastInitializeParams || typeof lastInitializeParams !== "object") {
+      return;
+    }
+
+    try {
+      await sendCodexRequest("initialize", lastInitializeParams);
+      codexHandshakeState = "warm";
+    } catch (error) {
+      const message = typeof error?.message === "string" ? error.message.toLowerCase() : "";
+      if (message.includes("already initialized")) {
+        codexHandshakeState = "warm";
+        return;
+      }
+      throw error;
+    }
   }
 
   function normalizeAccountRead(payload) {
@@ -871,6 +931,9 @@ function startBridge({
     }
 
     if (method === "initialize" && parsed.id != null) {
+      lastInitializeParams = parsed.params && typeof parsed.params === "object"
+        ? parsed.params
+        : {};
       const compatibilityError = bridgeManagedInitializeCompatibilityError(parsed.params || {});
       if (compatibilityError) {
         sendApplicationResponse(JSON.stringify({

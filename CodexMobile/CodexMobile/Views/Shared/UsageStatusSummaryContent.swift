@@ -8,8 +8,21 @@ import SwiftUI
 
 struct UsageStatusRefreshControl {
     let title: String
+    let systemImage: String
     let isRefreshing: Bool
     let action: () -> Void
+
+    init(
+        title: String,
+        systemImage: String = "arrow.clockwise",
+        isRefreshing: Bool,
+        action: @escaping () -> Void
+    ) {
+        self.title = title
+        self.systemImage = systemImage
+        self.isRefreshing = isRefreshing
+        self.action = action
+    }
 }
 
 struct UsageStatusSummaryContent: View {
@@ -25,6 +38,7 @@ struct UsageStatusSummaryContent: View {
     let rateLimitsErrorMessage: String?
     let contextPlacement: ContextPlacement
     let showsRateLimitHeader: Bool
+    let leadingControl: UsageStatusRefreshControl?
     let refreshControl: UsageStatusRefreshControl?
 
     init(
@@ -35,6 +49,7 @@ struct UsageStatusSummaryContent: View {
         rateLimitsErrorMessage: String?,
         contextPlacement: ContextPlacement = .top,
         showsRateLimitHeader: Bool = true,
+        leadingControl: UsageStatusRefreshControl? = nil,
         refreshControl: UsageStatusRefreshControl? = nil
     ) {
         self.contextWindowUsage = contextWindowUsage
@@ -44,13 +59,14 @@ struct UsageStatusSummaryContent: View {
         self.rateLimitsErrorMessage = rateLimitsErrorMessage
         self.contextPlacement = contextPlacement
         self.showsRateLimitHeader = showsRateLimitHeader
+        self.leadingControl = leadingControl
         self.refreshControl = refreshControl
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if let refreshControl {
-                refreshButton(refreshControl)
+            if leadingControl != nil || refreshControl != nil {
+                actionControlsRow
             }
 
             if showsContextWindowSection && contextPlacement == .top {
@@ -81,7 +97,7 @@ struct UsageStatusSummaryContent: View {
         VStack(alignment: .leading, spacing: 14) {
             if showsRateLimitHeader {
                 HStack {
-                    Text("Rate limits")
+                    Text(L("Rate limits", "速率限制"))
                         .font(AppFont.subheadline(weight: .semibold))
 
                     Spacer(minLength: 12)
@@ -104,11 +120,11 @@ struct UsageStatusSummaryContent: View {
                     .font(AppFont.caption())
                     .foregroundStyle(.secondary)
             } else if isLoadingRateLimits {
-                Text("Loading current limits...")
+                Text(L("Loading current limits...", "正在加载当前限制..."))
                     .font(AppFont.caption())
                     .foregroundStyle(.secondary)
             } else {
-                Text("Rate limits are unavailable for this account.")
+                Text(L("Rate limits are unavailable for this account.", "当前账号无法获取速率限制。"))
                     .font(AppFont.caption())
                     .foregroundStyle(.secondary)
             }
@@ -117,20 +133,24 @@ struct UsageStatusSummaryContent: View {
 
     private var contextSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Context window")
+            Text(L("Context window", "上下文窗口"))
                 .font(AppFont.subheadline(weight: .semibold))
 
             if let contextWindowUsage {
                 metricRow(
-                    label: "Context",
-                    value: "\(contextWindowUsage.percentRemaining)% left",
+                    label: L("Context", "上下文"),
+                    value: L("\(contextWindowUsage.percentRemaining)% left", "剩余 \(contextWindowUsage.percentRemaining)%"),
                     detail: "(\(compactTokenCount(contextWindowUsage.tokensUsed)) used / \(compactTokenCount(contextWindowUsage.tokenLimit)))",
                     monospace: true
                 )
 
                 progressBar(progress: contextWindowUsage.fractionUsed)
             } else {
-                metricRow(label: "Context", value: "Unavailable", detail: "Waiting for token usage")
+                metricRow(
+                    label: L("Context", "上下文"),
+                    value: L("Unavailable", "不可用"),
+                    detail: L("Waiting for token usage", "等待 token 用量数据")
+                )
             }
         }
     }
@@ -141,24 +161,38 @@ struct UsageStatusSummaryContent: View {
         CodexRateLimitBucket.visibleDisplayRows(from: rateLimitBuckets)
     }
 
-    private func refreshButton(_ refreshControl: UsageStatusRefreshControl) -> some View {
-        Button(action: refreshControl.action) {
+    private var actionControlsRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            if let leadingControl {
+                actionButton(leadingControl, alignment: .leading)
+            }
+
+            Spacer(minLength: 0)
+
+            if let refreshControl {
+                actionButton(refreshControl, alignment: .trailing)
+            }
+        }
+    }
+
+    private func actionButton(_ control: UsageStatusRefreshControl, alignment: Alignment) -> some View {
+        Button(action: control.action) {
             HStack(spacing: 8) {
-                if refreshControl.isRefreshing {
+                if control.isRefreshing {
                     ProgressView()
                         .controlSize(.small)
                 } else {
-                    Image(systemName: "arrow.clockwise")
+                    Image(systemName: control.systemImage)
                         .font(AppFont.system(size: 12, weight: .semibold))
                 }
 
-                Text(refreshControl.isRefreshing ? "Refreshing..." : refreshControl.title)
+                Text(control.isRefreshing ? L("Refreshing...", "刷新中...") : control.title)
                     .font(AppFont.subheadline(weight: .semibold))
             }
-            .frame(maxWidth: .infinity, alignment: .trailing)
+            .frame(maxWidth: .infinity, alignment: alignment)
         }
         .buttonStyle(.plain)
-        .disabled(refreshControl.isRefreshing)
+        .disabled(control.isRefreshing)
     }
 
     private func rateLimitRow(_ row: CodexRateLimitDisplayRow) -> some View {
@@ -170,7 +204,7 @@ struct UsageStatusSummaryContent: View {
 
                 Spacer(minLength: 12)
 
-                Text("\(row.window.remainingPercent)% left")
+                Text(L("\(row.window.remainingPercent)% left", "剩余 \(row.window.remainingPercent)%"))
                     .font(AppFont.mono(.callout))
                     .foregroundStyle(.primary)
 
@@ -264,11 +298,11 @@ struct UsageStatusSummaryContent: View {
         if calendar.isDate(resetsAt, inSameDayAs: now) {
             let formatter = DateFormatter()
             formatter.dateFormat = "HH:mm"
-            return "resets \(formatter.string(from: resetsAt))"
+            return L("resets \(formatter.string(from: resetsAt))", "\(formatter.string(from: resetsAt)) 重置")
         }
 
         let formatter = DateFormatter()
         formatter.dateFormat = "d MMM HH:mm"
-        return "resets \(formatter.string(from: resetsAt))"
+        return L("resets \(formatter.string(from: resetsAt))", "\(formatter.string(from: resetsAt)) 重置")
     }
 }

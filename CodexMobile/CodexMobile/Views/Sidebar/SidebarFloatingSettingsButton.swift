@@ -7,6 +7,7 @@ import SwiftUI
 
 struct SidebarFloatingSettingsButton: View {
     let colorScheme: ColorScheme
+    let isDisabled: Bool
     let action: () -> Void
 
     var body: some View {
@@ -21,8 +22,9 @@ struct SidebarFloatingSettingsButton: View {
                 .adaptiveGlass(.regular, in: Circle())
         }
         .buttonStyle(.plain)
+        .disabled(isDisabled)
         .contentShape(Circle())
-        .accessibilityLabel("Settings")
+        .accessibilityLabel(L("Settings", "设置"))
     }
 }
 
@@ -50,6 +52,6 @@ struct SidebarMacConnectionStatusView: View {
     }
 
     private var statusTitle: String {
-        isConnected ? "Connected to Mac" : "Saved Mac"
+        isConnected ? L("Connected to Mac", "已连接到 Mac") : L("Saved Mac", "已保存的 Mac")
     }
 }
