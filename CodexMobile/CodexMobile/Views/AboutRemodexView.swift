@@ -256,6 +256,7 @@ struct AboutRemodexView: View {
             Spacer().frame(height: 4)
 
             bodyText("Also supports **workspace revert** — preview and apply reverse patches when the assistant makes changes you want to undo.")
+            bodyText("You can also use the per-response Undo changes button to reverse a single assistant patch.")
         }
     }
 

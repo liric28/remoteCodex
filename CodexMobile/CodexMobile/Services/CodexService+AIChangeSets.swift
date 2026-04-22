@@ -388,6 +388,28 @@ private extension CodexService {
         )
 
         if source == .fileChangeFallback && changeSet.source == .turnDiff {
+            guard shouldPreferScopedPatch(analysis, over: changeSet) else {
+                return
+            }
+            changeSet.fallbackPatchCount = 0
+            changeSet.forwardUnifiedPatch = ""
+            changeSet.fileChanges = []
+            changeSet.unsupportedReasons = []
+        }
+
+        if source == .turnDiff,
+           changeSet.source == .fileChangeFallback,
+           changeSet.fallbackPatchCount == 1,
+           shouldPreferScopedPatch(
+               AIUnifiedPatchAnalysis(
+                   fileChanges: changeSet.fileChanges,
+                   unsupportedReasons: changeSet.unsupportedReasons
+               ),
+               over: analysis
+           ) {
+            finalizeChangeSetIfPossible(changeSetId: changeSetId)
+            persistAIChangeSets()
+            invalidateAssistantRevertStates()
             return
         }
 
@@ -464,6 +486,40 @@ private extension CodexService {
         if let assistantMessageId = changeSet.assistantMessageId {
             aiChangeSetIDByAssistantMessageID[assistantMessageId] = changeSetId
         }
+    }
+
+    func shouldPreferScopedPatch(_ scopedAnalysis: AIUnifiedPatchAnalysis, over broaderChangeSet: AIChangeSet) -> Bool {
+        let broaderAnalysis = AIUnifiedPatchAnalysis(
+            fileChanges: broaderChangeSet.fileChanges,
+            unsupportedReasons: broaderChangeSet.unsupportedReasons
+        )
+        return shouldPreferScopedPatch(scopedAnalysis, over: broaderAnalysis)
+    }
+
+    func shouldPreferScopedPatch(_ scopedAnalysis: AIUnifiedPatchAnalysis, over broaderAnalysis: AIUnifiedPatchAnalysis) -> Bool {
+        guard scopedAnalysis.unsupportedReasons.isEmpty, !scopedAnalysis.fileChanges.isEmpty else {
+            return false
+        }
+
+        if !broaderAnalysis.unsupportedReasons.isEmpty || broaderAnalysis.fileChanges.isEmpty {
+            return true
+        }
+
+        let scopedFiles = Set(scopedAnalysis.fileChanges.map(\.path))
+        let broaderFiles = Set(broaderAnalysis.fileChanges.map(\.path))
+        guard broaderFiles.isSuperset(of: scopedFiles) else {
+            return false
+        }
+
+        if broaderFiles != scopedFiles {
+            return true
+        }
+
+        let scopedAdditions = scopedAnalysis.fileChanges.reduce(0) { $0 + $1.additions }
+        let scopedDeletions = scopedAnalysis.fileChanges.reduce(0) { $0 + $1.deletions }
+        let broaderAdditions = broaderAnalysis.fileChanges.reduce(0) { $0 + $1.additions }
+        let broaderDeletions = broaderAnalysis.fileChanges.reduce(0) { $0 + $1.deletions }
+        return broaderAdditions > scopedAdditions || broaderDeletions > scopedDeletions
     }
 
     func persistAIChangeSets() {
