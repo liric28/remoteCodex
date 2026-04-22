@@ -7,6 +7,13 @@
 import Foundation
 import UIKit
 
+struct CodexPendingAssistantDelta {
+    let threadId: String
+    let turnId: String
+    var itemId: String?
+    var delta: String
+}
+
 private enum TurnTimelineProjectionPolicy {
     // Long chats can contain thousands of persisted rows. Keep initial/open-chat projection
     // bounded to the recent tail so selecting one thread does not freeze the whole screen.
@@ -21,6 +28,13 @@ private enum CanonicalHistoryReconcileRetryPolicy {
 }
 
 extension CodexService {
+    private var assistantDeltaCoalescingDelayNanoseconds: UInt64 { 75_000_000 }
+    private var assistantDeltaImmediateFlushCharacterLimit: Int { 240 }
+
+    private var shouldStreamAssistantDeltasInBatches: Bool {
+        UserDefaults.standard.object(forKey: Self.streamAssistantDeltasInBatchesDefaultsKey) as? Bool ?? true
+    }
+
     enum ThreadHistoryLoadOutcome: Equatable {
         case alreadyHydrated
         case notMaterialized
@@ -2345,6 +2359,51 @@ extension CodexService {
             return
         }
 
+        guard shouldStreamAssistantDeltasInBatches else {
+            applyAssistantDelta(threadId: threadId, turnId: turnId, itemId: itemId, delta: delta)
+            return
+        }
+
+        let baseStreamKey = streamingAssistantDeltaKey(threadId: threadId, turnId: turnId, itemId: nil)
+        let streamKey = streamingAssistantDeltaKey(threadId: threadId, turnId: turnId, itemId: itemId)
+        if streamKey != baseStreamKey,
+           let basePending = pendingAssistantDeltaByStreamKey.removeValue(forKey: baseStreamKey) {
+            var mergedPending = pendingAssistantDeltaByStreamKey[streamKey] ?? CodexPendingAssistantDelta(
+                threadId: threadId,
+                turnId: turnId,
+                itemId: itemId,
+                delta: ""
+            )
+            mergedPending.delta = basePending.delta + mergedPending.delta
+            if mergedPending.itemId == nil {
+                mergedPending.itemId = itemId
+            }
+            pendingAssistantDeltaByStreamKey[streamKey] = mergedPending
+        }
+
+        if var pending = pendingAssistantDeltaByStreamKey[streamKey] {
+            pending.delta += delta
+            if pending.itemId == nil, let itemId {
+                pending.itemId = itemId
+            }
+            pendingAssistantDeltaByStreamKey[streamKey] = pending
+        } else {
+            pendingAssistantDeltaByStreamKey[streamKey] = CodexPendingAssistantDelta(
+                threadId: threadId,
+                turnId: turnId,
+                itemId: itemId,
+                delta: delta
+            )
+        }
+
+        if shouldFlushAssistantDeltaImmediately(delta: pendingAssistantDeltaByStreamKey[streamKey]?.delta ?? delta) {
+            flushPendingAssistantDeltas(keys: [streamKey])
+        } else {
+            scheduleAssistantDeltaCoalescingFlush()
+        }
+    }
+
+    private func applyAssistantDelta(threadId: String, turnId: String, itemId: String?, delta: String) {
         let messageID = ensureStreamingAssistantMessage(threadId: threadId, turnId: turnId, itemId: itemId)
         guard let messageID,
               let messageIndex = findMessageIndex(threadId: threadId, messageId: messageID) else {
@@ -2375,8 +2434,78 @@ extension CodexService {
         updateStreamingAssistantOutput(for: threadId, messageId: messageID, rawMessageIndex: messageIndex)
     }
 
+    private func scheduleAssistantDeltaCoalescingFlush() {
+        guard assistantDeltaCoalescingTask == nil else {
+            return
+        }
+
+        assistantDeltaCoalescingTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: self.assistantDeltaCoalescingDelayNanoseconds)
+            guard !Task.isCancelled else { return }
+            self.flushPendingAssistantDeltas()
+        }
+    }
+
+    private func shouldFlushAssistantDeltaImmediately(delta: String) -> Bool {
+        delta.contains("\n") || delta.count >= assistantDeltaImmediateFlushCharacterLimit
+    }
+
+    private func streamingAssistantDeltaKey(threadId: String, turnId: String, itemId: String?) -> String {
+        let baseKey = streamingMessageKey(threadId: threadId, turnId: turnId)
+        guard let itemId,
+              !itemId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return baseKey
+        }
+        return "\(baseKey)|item:\(itemId)"
+    }
+
+    func flushPendingAssistantDeltas(threadId: String? = nil, turnId: String? = nil) {
+        let keys = pendingAssistantDeltaByStreamKey.compactMap { key, pending -> String? in
+            if let threadId, pending.threadId != threadId {
+                return nil
+            }
+            if let turnId, pending.turnId != turnId {
+                return nil
+            }
+            return key
+        }
+        flushPendingAssistantDeltas(keys: keys)
+    }
+
+    private func flushPendingAssistantDeltas(keys: [String]) {
+        guard !keys.isEmpty else {
+            return
+        }
+
+        assistantDeltaCoalescingTask?.cancel()
+        assistantDeltaCoalescingTask = nil
+
+        for key in keys {
+            guard let pending = pendingAssistantDeltaByStreamKey.removeValue(forKey: key) else {
+                continue
+            }
+            applyAssistantDelta(
+                threadId: pending.threadId,
+                turnId: pending.turnId,
+                itemId: pending.itemId,
+                delta: pending.delta
+            )
+        }
+
+        if !pendingAssistantDeltaByStreamKey.isEmpty {
+            scheduleAssistantDeltaCoalescingFlush()
+        }
+    }
+
     // Finalizes assistant text when item/completed carries the canonical message body.
     func completeAssistantMessage(threadId: String, turnId: String?, itemId: String?, text: String) {
+        if let turnId {
+            flushPendingAssistantDeltas(threadId: threadId, turnId: turnId)
+        } else {
+            flushPendingAssistantDeltas(threadId: threadId)
+        }
+
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty else {
             return
@@ -2607,6 +2736,12 @@ extension CodexService {
 
     // Marks streaming assistant state complete once turn/completed arrives.
     func markTurnCompleted(threadId: String, turnId: String?) {
+        if let turnId {
+            flushPendingAssistantDeltas(threadId: threadId, turnId: turnId)
+        } else {
+            flushPendingAssistantDeltas(threadId: threadId)
+        }
+
         clearRunningState(for: threadId)
         clearRunningThreadWatch(threadId)
         let resolvedTurnId = turnId ?? activeTurnIdByThread[threadId]
@@ -2780,6 +2915,8 @@ extension CodexService {
 
     // Converts all pending streaming bubbles to completed state after transport failures.
     func finalizeAllStreamingState() {
+        flushPendingAssistantDeltas()
+
         var didMutate = false
 
         for threadId in messagesByThread.keys {
@@ -2803,6 +2940,9 @@ extension CodexService {
         clearAllRunningState()
         streamingAssistantMessageByTurnID.removeAll()
         streamingSystemMessageByItemID.removeAll()
+        pendingAssistantDeltaByStreamKey.removeAll()
+        assistantDeltaCoalescingTask?.cancel()
+        assistantDeltaCoalescingTask = nil
         threadIdByTurnID.removeAll()
 
         if didMutate {

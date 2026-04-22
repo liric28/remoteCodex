@@ -51,6 +51,7 @@ struct SettingsView: View {
 
     @AppStorage("codex.appFontStyle") private var appFontStyleRawValue = AppFont.defaultStoredStyleRawValue
     @AppStorage(AppLanguage.storageKey) private var appLanguageRawValue = AppLanguage.system.rawValue
+    @AppStorage(CodexService.streamAssistantDeltasInBatchesDefaultsKey) private var streamAssistantDeltasInBatches = true
     @State private var isShowingMacNameSheet = false
 
     private let runtimeAutoValue = "__AUTO__"
@@ -69,6 +70,7 @@ struct SettingsView: View {
                 SettingsGPTAccountCard()
                 SettingsBridgeVersionCard()
                 runtimeDefaultsSection
+                chatDisplaySection
                 SettingsAboutCard()
                 SettingsUsageCard()
                 connectionSection
@@ -174,6 +176,22 @@ struct SettingsView: View {
                 .labelsHidden()
                 .tint(settingsAccentColor)
             }
+        }
+    }
+
+    @ViewBuilder private var chatDisplaySection: some View {
+        SettingsCard(title: L("Chat Display", "聊天显示")) {
+            Toggle(
+                L("Batch streaming text", "批量显示流式文本"),
+                isOn: $streamAssistantDeltasInBatches
+            )
+            .tint(settingsAccentColor)
+
+            Text(streamAssistantDeltasInBatches
+                 ? L("Assistant replies update in larger chunks for smoother rendering on iPhone.", "助手回复会以更大的片段刷新，让 iPhone 渲染更顺滑。")
+                 : L("Assistant replies update every incoming token, matching the previous behavior.", "助手回复会按每个传入 token 刷新，等同之前的行为。"))
+                .font(AppFont.caption())
+                .foregroundStyle(.secondary)
         }
     }
 
