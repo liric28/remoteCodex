@@ -5,6 +5,9 @@
 // Depends on: ws, crypto, os, ./qr, ./codex-desktop-refresher, ./codex-transport, ./rollout-watch, ./voice-handler, ./ios-app-compatibility
 
 const WebSocket = require("ws");
+const dns = require("dns");
+const https = require("https");
+const net = require("net");
 const { randomBytes } = require("crypto");
 const { execFile, spawn } = require("child_process");
 const os = require("os");
@@ -52,6 +55,13 @@ const RELAY_WATCHDOG_STALE_AFTER_MS = 25_000;
 const BRIDGE_STATUS_HEARTBEAT_INTERVAL_MS = 5_000;
 const STALE_RELAY_STATUS_MESSAGE = "Relay heartbeat stalled; reconnect pending.";
 const RELAY_HISTORY_IMAGE_REFERENCE_URL = "remodex://history-image-elided";
+const RELAY_DNS_MODE_DOH = "doh";
+const RELAY_DOH_HOSTNAME = "1.1.1.1";
+const RELAY_DOH_SERVER_NAME = "cloudflare-dns.com";
+const RELAY_DOH_TIMEOUT_MS = 5_000;
+const RELAY_DOH_MIN_TTL_MS = 15_000;
+const RELAY_DOH_MAX_TTL_MS = 5 * 60_000;
+const relayDohCache = new Map();
 function startBridge({
   config: explicitConfig = null,
   printPairingQr = true,
@@ -355,6 +365,10 @@ function startBridge({
         "x-notification-secret": notificationSecret,
         ...buildMacRegistrationHeaders(deviceState, pairingSession),
       },
+      lookup: createRelayLookup({
+        mode: config.relayDnsMode || process.env.REMODEX_RELAY_DNS_MODE,
+        overrides: config.relayDnsOverrides || process.env.REMODEX_RELAY_DNS_OVERRIDES,
+      }),
     });
     socket = nextSocket;
 
@@ -1554,10 +1568,175 @@ function persistBridgePreferences(
   });
 }
 
+function createRelayLookup(options = {}) {
+  const rawOverrides = Array.isArray(options) || typeof options === "string"
+    ? options
+    : options?.overrides;
+  const mode = normalizeRelayDnsMode(
+    Array.isArray(options) || typeof options === "string"
+      ? ""
+      : options?.mode
+  );
+  const overrides = parseRelayDnsOverrides(rawOverrides);
+  if (overrides.size === 0 && mode !== RELAY_DNS_MODE_DOH) {
+    return undefined;
+  }
+
+  return function relayLookup(hostname, options, callback) {
+    if (typeof options === "function") {
+      callback = options;
+      options = {};
+    }
+
+    const normalizedHost = typeof hostname === "string" ? hostname.trim().toLowerCase() : "";
+    const overrideAddress = overrides.get(normalizedHost);
+    if (!overrideAddress) {
+      if (mode !== RELAY_DNS_MODE_DOH) {
+        dns.lookup(hostname, options, callback);
+        return;
+      }
+
+      resolveRelayHostnameWithDoh(normalizedHost)
+        .then((address) => {
+          if (options?.all) {
+            callback(null, [{ address, family: 4 }]);
+            return;
+          }
+
+          callback(null, address, 4);
+        })
+        .catch(() => {
+          dns.lookup(hostname, options, callback);
+        });
+      return;
+    }
+
+    const family = net.isIP(overrideAddress);
+    if (!family) {
+      dns.lookup(hostname, options, callback);
+      return;
+    }
+
+    if (options?.all) {
+      callback(null, [{ address: overrideAddress, family }]);
+      return;
+    }
+
+    callback(null, overrideAddress, family);
+  };
+}
+
+function parseRelayDnsOverrides(rawOverrides) {
+  if (!rawOverrides) {
+    return new Map();
+  }
+
+  const entries = Array.isArray(rawOverrides)
+    ? rawOverrides
+    : String(rawOverrides).split(/[,\n]/);
+  const overrides = new Map();
+  for (const entry of entries) {
+    const [host, address] = String(entry).split("=").map((part) => part.trim());
+    if (!host || !address || !net.isIP(address)) {
+      continue;
+    }
+
+    overrides.set(host.toLowerCase(), address);
+  }
+
+  return overrides;
+}
+
+function normalizeRelayDnsMode(value) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return normalized === RELAY_DNS_MODE_DOH ? RELAY_DNS_MODE_DOH : "";
+}
+
+async function resolveRelayHostnameWithDoh(hostname, {
+  cache = relayDohCache,
+  now = Date.now,
+  requestDohJSON = requestRelayDohJSON,
+} = {}) {
+  if (!hostname || net.isIP(hostname)) {
+    throw new Error("DoH relay lookup requires a hostname.");
+  }
+
+  const cached = cache.get(hostname);
+  const nowMs = now();
+  if (cached && cached.expiresAt > nowMs) {
+    return cached.address;
+  }
+
+  const result = await requestDohJSON(hostname);
+  cache.set(hostname, {
+    address: result.address,
+    expiresAt: nowMs + result.ttlMs,
+  });
+  return result.address;
+}
+
+function requestRelayDohJSON(hostname) {
+  return new Promise((resolve, reject) => {
+    const request = https.request({
+      hostname: RELAY_DOH_HOSTNAME,
+      servername: RELAY_DOH_SERVER_NAME,
+      path: `/dns-query?name=${encodeURIComponent(hostname)}&type=A`,
+      method: "GET",
+      headers: {
+        accept: "application/dns-json",
+        host: RELAY_DOH_SERVER_NAME,
+      },
+      timeout: RELAY_DOH_TIMEOUT_MS,
+    }, (response) => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => {
+        body += chunk;
+        if (body.length > 64 * 1024) {
+          request.destroy(new Error("DoH response is too large."));
+        }
+      });
+      response.on("end", () => {
+        if (response.statusCode !== 200) {
+          reject(new Error(`DoH request failed with HTTP ${response.statusCode}.`));
+          return;
+        }
+
+        const parsed = parseBridgeJSON(body);
+        const answer = Array.isArray(parsed?.Answer)
+          ? parsed.Answer.find((entry) => entry?.type === 1 && net.isIP(entry?.data) === 4)
+          : null;
+        if (!answer) {
+          reject(new Error("DoH response did not include an A record."));
+          return;
+        }
+
+        const ttlSeconds = Number(answer.TTL);
+        const ttlMs = Number.isFinite(ttlSeconds)
+          ? Math.min(RELAY_DOH_MAX_TTL_MS, Math.max(RELAY_DOH_MIN_TTL_MS, ttlSeconds * 1000))
+          : RELAY_DOH_MIN_TTL_MS;
+        resolve({
+          address: answer.data,
+          ttlMs,
+        });
+      });
+    });
+
+    request.on("timeout", () => {
+      request.destroy(new Error("DoH request timed out."));
+    });
+    request.on("error", reject);
+    request.end();
+  });
+}
+
 module.exports = {
   buildHeartbeatBridgeStatus,
   createMacOSBridgeWakeAssertion,
+  createRelayLookup,
   hasRelayConnectionGoneStale,
+  parseRelayDnsOverrides,
+  resolveRelayHostnameWithDoh,
   persistBridgePreferences,
   sanitizeThreadHistoryImagesForRelay,
   startBridge,
