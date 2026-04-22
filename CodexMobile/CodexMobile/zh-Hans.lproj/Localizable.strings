@@ -113,11 +113,8 @@
 "System Language" = "系统语言";
 "English" = "英文";
 "Chinese" = "中文";
-"Model" = "模型";
-"Auto" = "自动";
 "Reasoning" = "推理强度";
 "Speed" = "速度";
-"Normal" = "普通";
 "Access" = "访问权限";
 "No paired Mac" = "未配对 Mac";
 "Keep Mac reachable" = "保持 Mac 可连接";
@@ -229,7 +226,6 @@
 "Approval request" = "批准请求";
 "Copy" = "复制";
 "Select Text" = "选择文本";
-"Diff" = "差异";
 "Command" = "命令";
 "Output (last %lld lines)" = "输出（最后 %lld 行）";
 "Questions" = "问题";
