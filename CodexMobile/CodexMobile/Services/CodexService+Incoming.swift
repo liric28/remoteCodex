@@ -506,6 +506,23 @@ extension CodexService {
     private func handleTurnCompleted(_ paramsObject: IncomingParamsObject?) {
         let completedTurnID = extractTurnIDForTurnLifecycleEvent(from: paramsObject)
         let turnFailureMessage = parseTurnFailureMessage(from: paramsObject)
+        let shouldRetryTurn = shouldRetryTurnError(
+            from: paramsObject,
+            fallbackMessage: turnFailureMessage
+        )
+
+        if shouldRetryTurn {
+            if let threadId = resolveThreadID(from: paramsObject, turnIdHint: completedTurnID) {
+                if let completedTurnID {
+                    setActiveTurnID(completedTurnID, for: threadId)
+                    threadIdByTurnID[completedTurnID] = threadId
+                    setProtectedRunningFallback(false, for: threadId)
+                }
+                markThreadAsRunning(threadId)
+                requestImmediateSync(threadId: threadId)
+            }
+            return
+        }
 
         if let threadId = resolveThreadID(from: paramsObject, turnIdHint: completedTurnID) {
             if let completedTurnID {
@@ -2879,6 +2896,20 @@ extension CodexService {
 
     private func shouldRetryTurnError(from paramsObject: IncomingParamsObject?) -> Bool {
         let eventObject = envelopeEventObject(from: paramsObject)
+        let fallbackMessage = firstNonEmptyString([
+            firstStringValue(in: paramsObject, keys: ["message", "errorMessage"]),
+            firstStringValue(in: paramsObject?["error"]?.objectValue, keys: ["message"]),
+            firstStringValue(in: eventObject, keys: ["message", "errorMessage"]),
+            firstStringValue(in: eventObject?["error"]?.objectValue, keys: ["message"]),
+        ])
+        return shouldRetryTurnError(from: paramsObject, fallbackMessage: fallbackMessage)
+    }
+
+    private func shouldRetryTurnError(
+        from paramsObject: IncomingParamsObject?,
+        fallbackMessage: String?
+    ) -> Bool {
+        let eventObject = envelopeEventObject(from: paramsObject)
 
         let candidates: [JSONValue?] = [
             paramsObject?["willRetry"],
@@ -2894,7 +2925,30 @@ extension CodexService {
                 return parsed
             }
         }
-        return false
+
+        return shouldTreatProviderReconnectMessageAsRetry(fallbackMessage)
+    }
+
+    private func shouldTreatProviderReconnectMessageAsRetry(_ message: String?) -> Bool {
+        guard let normalizedMessage = message?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+            !normalizedMessage.isEmpty else {
+            return false
+        }
+
+        let mentionsReconnect = normalizedMessage.contains("reconnecting")
+            || normalizedMessage.contains("retrying")
+        let mentionsProviderDrop = normalizedMessage.contains("provider dropped")
+            || normalizedMessage.contains("connection to provider dropped")
+        let mentionsReadTimeout = normalizedMessage.contains("readtimeout")
+            || normalizedMessage.contains("read timeout")
+
+        guard mentionsReconnect else {
+            return false
+        }
+
+        return mentionsProviderDrop || mentionsReadTimeout
     }
 
     private func parseBooleanFlag(_ value: JSONValue?) -> Bool? {

@@ -295,6 +295,44 @@ final class CodexServiceIncomingRunIndicatorTests: XCTestCase {
         XCTAssertTrue(service.failedThreadIDs.isEmpty)
     }
 
+    func testProviderReadTimeoutErrorKeepsThreadRunningWithoutFailedBadge() {
+        let service = makeService()
+        let threadID = "thread-\(UUID().uuidString)"
+        let turnID = "turn-\(UUID().uuidString)"
+
+        sendTurnStarted(service: service, threadID: threadID, turnID: turnID)
+        sendTurnFailed(
+            service: service,
+            threadID: threadID,
+            turnID: turnID,
+            message: "Connection to provider dropped (ReadTimeout). Reconnecting… (attempt 2/3)"
+        )
+
+        XCTAssertEqual(service.threadRunBadgeState(for: threadID), .running)
+        XCTAssertTrue(service.failedThreadIDs.isEmpty)
+        XCTAssertEqual(service.activeTurnID(for: threadID), turnID)
+        XCTAssertNil(service.lastErrorMessage)
+    }
+
+    func testProviderReadTimeoutCompletionFailureStaysInRunningState() {
+        let service = makeService()
+        let threadID = "thread-\(UUID().uuidString)"
+        let turnID = "turn-\(UUID().uuidString)"
+
+        sendTurnStarted(service: service, threadID: threadID, turnID: turnID)
+        sendTurnCompletedFailure(
+            service: service,
+            threadID: threadID,
+            turnID: turnID,
+            message: "Connection to provider dropped (ReadTimeout). Reconnecting… (attempt 2/3)"
+        )
+
+        XCTAssertEqual(service.threadRunBadgeState(for: threadID), .running)
+        XCTAssertTrue(service.failedThreadIDs.isEmpty)
+        XCTAssertEqual(service.activeTurnID(for: threadID), turnID)
+        XCTAssertNil(service.lastErrorMessage)
+    }
+
     func testCompletionFailureMarksThreadAsFailed() {
         let service = makeService()
         let threadID = "thread-\(UUID().uuidString)"
