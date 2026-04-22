@@ -370,7 +370,7 @@ struct SettingsCard<Content: View>: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.tertiarySystemFill).opacity(0.5), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .adaptiveGlass(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
     }
 }
@@ -631,10 +631,7 @@ private struct SettingsGPTAccountCard: View {
                 .foregroundStyle(.primary)
                 .padding(.vertical, 10)
                 .padding(.horizontal, 14)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.primary.opacity(0.06))
-                )
+                .adaptiveGlass(.regular, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
         }
@@ -906,10 +903,7 @@ private struct SettingsAboutCard: View {
         .foregroundStyle(.primary)
         .padding(.vertical, 10)
         .padding(.horizontal, 14)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.primary.opacity(0.06))
-        )
+        .adaptiveGlass(.regular, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -926,10 +920,7 @@ private struct SettingsTrustedMacCard: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .frame(width: 32, height: 32)
-                        .background(
-                            Circle()
-                                .fill(Color.primary.opacity(0.06))
-                        )
+                        .adaptiveGlass(.regular, in: Circle())
 
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Mac")
@@ -951,10 +942,7 @@ private struct SettingsTrustedMacCard: View {
                         .font(AppFont.caption(weight: .semibold))
                         .foregroundStyle(.secondary)
                         .frame(width: 30, height: 30)
-                        .background(
-                            Circle()
-                                .fill(Color.primary.opacity(0.07))
-                        )
+                        .adaptiveGlass(.regular, in: Circle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(L("Edit Mac name", "编辑 Mac 名称"))
@@ -979,14 +967,7 @@ private struct SettingsTrustedMacCard: View {
             }
         }
         .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(.secondarySystemFill).opacity(0.45))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.primary.opacity(0.05), lineWidth: 1)
-        )
+        .adaptiveGlass(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var compactTitle: String? {
@@ -1020,10 +1001,7 @@ private struct SettingsStatusPill: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color.primary.opacity(0.07))
-            )
+            .adaptiveGlass(.regular, in: Capsule(style: .continuous))
     }
 }
 
@@ -1054,10 +1032,7 @@ private struct SettingsMacNameSheet: View {
                     .font(AppFont.subheadline())
                     .padding(.horizontal, 12)
                     .padding(.vertical, 11)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color(.secondarySystemFill))
-                    )
+                    .adaptiveGlass(.regular, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 Text(L("This nickname stays on this iPhone and appears anywhere this Mac is shown.", "这个昵称只保存在这台 iPhone 上，并会显示在所有出现这台 Mac 的地方。"))
                     .font(AppFont.caption())

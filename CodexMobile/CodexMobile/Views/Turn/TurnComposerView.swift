@@ -175,7 +175,7 @@ struct TurnComposerView: View {
                 )
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .adaptiveGlass(.regular, in: RoundedRectangle(cornerRadius: 28))
+            .adaptiveGlass(.toolbarControl, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
             .overlay(alignment: .topLeading) {
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: 0, alignment: .topLeading)

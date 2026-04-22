@@ -47,7 +47,7 @@ struct ContextWindowProgressRing: View {
             }
             .frame(width: ringSize, height: ringSize)
             .frame(width: tapTargetSize, height: tapTargetSize)
-            .adaptiveGlass(.regular, in: Circle())
+            .adaptiveGlass(.toolbarControl, in: Circle())
             .contentShape(Circle())
         }
         .buttonStyle(.plain)

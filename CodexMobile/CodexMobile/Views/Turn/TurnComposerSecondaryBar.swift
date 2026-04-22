@@ -109,7 +109,7 @@ struct TurnComposerSecondaryBar: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .adaptiveGlass(.regular, in: Capsule())
+            .adaptiveGlass(.toolbarControl, in: Capsule())
             .foregroundStyle(branchLabelColor)
             .contentShape(Capsule())
         }
@@ -170,7 +170,7 @@ struct TurnComposerSecondaryBar: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .adaptiveGlass(.regular, in: Capsule())
+            .adaptiveGlass(.toolbarControl, in: Capsule())
             .foregroundStyle(branchLabelColor)
             .contentShape(Capsule())
         }

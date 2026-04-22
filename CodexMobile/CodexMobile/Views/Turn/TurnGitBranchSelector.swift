@@ -156,7 +156,7 @@ struct TurnGitBranchSelector: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .adaptiveGlass(.regular, in: Capsule())
+            .adaptiveGlass(.toolbarControl, in: Capsule())
             .foregroundStyle(branchLabelColor)
             .contentShape(Capsule())
         }
