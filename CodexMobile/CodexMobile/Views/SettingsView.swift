@@ -48,7 +48,6 @@ private extension AppFont.Style {
 
 struct SettingsView: View {
     @Environment(CodexService.self) private var codex
-    @Environment(SubscriptionService.self) private var subscriptions
 
     @AppStorage("codex.appFontStyle") private var appFontStyleRawValue = AppFont.defaultStoredStyleRawValue
     @AppStorage(AppLanguage.storageKey) private var appLanguageRawValue = AppLanguage.system.rawValue
@@ -68,7 +67,6 @@ struct SettingsView: View {
                 )
                 SettingsNotificationsCard()
                 SettingsGPTAccountCard()
-                SettingsSubscriptionCard()
                 SettingsBridgeVersionCard()
                 runtimeDefaultsSection
                 SettingsAboutCard()
@@ -87,12 +85,6 @@ struct SettingsView: View {
                     systemName: trustedPairPresentation.systemName ?? trustedPairPresentation.name
                 )
             }
-        }
-        .task {
-            guard subscriptions.bootstrapState == .idle else {
-                return
-            }
-            await subscriptions.bootstrap()
         }
     }
 
@@ -356,52 +348,6 @@ struct SettingsView: View {
             get: { SidebarMacNicknameStore.nickname(for: presentation.deviceId) },
             set: { SidebarMacNicknameStore.setNickname($0, for: presentation.deviceId) }
         )
-    }
-}
-
-private struct SettingsSubscriptionCard: View {
-    @Environment(SubscriptionService.self) private var subscriptions
-    @State private var isPresentingPaywall = false
-
-    var body: some View {
-        SettingsCard(title: "Remodex Pro") {
-            HStack {
-                Text(L("Status", "状态"))
-                Spacer()
-                Text(subscriptions.hasProAccess ? L("Active", "已激活") : L("Free", "免费版"))
-                    .foregroundStyle(subscriptions.hasProAccess ? .green : .secondary)
-            }
-
-            if subscriptions.hasProAccess {
-                Text(L("Your Pro access is active. You can still restore purchases or manage the purchase from Apple.", "你的 Pro 权限已激活，仍可从 Apple 恢复购买或管理订阅。"))
-                    .font(AppFont.caption())
-                    .foregroundStyle(.secondary)
-            } else {
-                Text(L("Open the custom paywall to choose a monthly, yearly, or lifetime plan.", "打开自定义付费页，选择月付、年付或永久方案。"))
-                    .font(AppFont.caption())
-                    .foregroundStyle(.secondary)
-            }
-
-            SettingsButton(subscriptions.hasProAccess ? L("View Pro", "查看 Pro") : L("Upgrade to Pro", "升级到 Pro")) {
-                isPresentingPaywall = true
-            }
-
-            SettingsButton(subscriptions.isRestoring ? L("Restoring...", "正在恢复...") : L("Restore Purchases", "恢复购买"), isLoading: subscriptions.isRestoring) {
-                Task {
-                    await subscriptions.restorePurchases()
-                }
-            }
-            .disabled(subscriptions.isPurchasing)
-
-            if let error = subscriptions.lastErrorMessage, !error.isEmpty {
-                Text(localizedAppMessage(error))
-                    .font(AppFont.caption())
-                    .foregroundStyle(.red)
-            }
-        }
-        .sheet(isPresented: $isPresentingPaywall) {
-            RevenueCatPaywallView()
-        }
     }
 }
 
