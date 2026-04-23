@@ -17,6 +17,10 @@ extension StructuredText {
       }
       .background(DynamicColor.gitHubSecondaryBackground)
       .clipShape(RoundedRectangle(cornerRadius: 6))
+      .contentShape(Rectangle())
+      .onTapGesture(count: 2) {
+        configuration.codeBlock.copyToPasteboard()
+      }
       .textual.blockSpacing(.init(top: 0, bottom: 16))
     }
   }
