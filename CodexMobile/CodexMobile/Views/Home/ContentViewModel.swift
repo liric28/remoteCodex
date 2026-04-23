@@ -18,6 +18,7 @@ final class ContentViewModel {
     private(set) var isRunningManualReconnect = false
     private var shouldCancelManualReconnect = false
     private var shouldResolveTrustedSessionBeforeNextConnect = false
+    private var didUseSavedSessionFastPathForCurrentConnect = false
     // Test hooks keep reconnect verification fast without changing production retry behavior.
     @ObservationIgnored var reconnectAttemptLimitOverride: Int?
     @ObservationIgnored var connectOverride: ((CodexService, String) async throws -> Void)?
@@ -118,6 +119,7 @@ final class ContentViewModel {
         codex.lastErrorMessage = nil
         codex.cancelTrustedSessionResolve()
         shouldResolveTrustedSessionBeforeNextConnect = false
+        didUseSavedSessionFastPathForCurrentConnect = false
 
         if codex.isConnecting || codex.isConnected {
             await codex.disconnect()
@@ -136,6 +138,7 @@ final class ContentViewModel {
         codex.lastErrorMessage = nil
         codex.cancelTrustedSessionResolve()
         shouldResolveTrustedSessionBeforeNextConnect = false
+        didUseSavedSessionFastPathForCurrentConnect = false
 
         // Cancel any in-flight reconnect so the scanner can appear immediately instead of waiting
         // for a stalled handshake to time out on its own.
@@ -217,6 +220,7 @@ final class ContentViewModel {
                 )
                 try await connect(codex: codex, serverURL: fullURL)
                 shouldResolveTrustedSessionBeforeNextConnect = false
+                didUseSavedSessionFastPathForCurrentConnect = false
                 codex.connectionRecoveryState = .idle
                 codex.lastErrorMessage = nil
                 codex.shouldAutoReconnectOnForeground = false
@@ -351,6 +355,7 @@ extension ContentViewModel {
             do {
                 try await connect(codex: codex, serverURL: serverURL)
                 shouldResolveTrustedSessionBeforeNextConnect = false
+                didUseSavedSessionFastPathForCurrentConnect = false
                 codex.connectionRecoveryState = .idle
                 codex.lastErrorMessage = nil
                 codex.shouldAutoReconnectOnForeground = false
@@ -419,16 +424,20 @@ extension ContentViewModel {
     func preferredReconnectURL(codex: CodexService) async -> String? {
         if codex.hasSavedRelaySession && !shouldResolveTrustedSessionBeforeNextConnect {
             codex.lastErrorMessage = nil
+            didUseSavedSessionFastPathForCurrentConnect = true
             return savedReconnectURL(codex: codex)
         }
 
         switch await trustedReconnectResolution(codex: codex) {
         case .use(let resolvedURL):
             shouldResolveTrustedSessionBeforeNextConnect = false
+            didUseSavedSessionFastPathForCurrentConnect = false
             return resolvedURL
         case .fallbackToSaved:
+            didUseSavedSessionFastPathForCurrentConnect = false
             return savedReconnectURL(codex: codex)
         case .stop:
+            didUseSavedSessionFastPathForCurrentConnect = false
             return nil
         }
     }
@@ -441,6 +450,7 @@ extension ContentViewModel {
         codex: CodexService
     ) -> Bool {
         codex.hasTrustedMacReconnectCandidate
+            && didUseSavedSessionFastPathForCurrentConnect
             && !shouldResolveTrustedSessionBeforeNextConnect
             && (codex.isRetryableSavedSessionConnectError(error)
                 || codex.isRecoverableTransientConnectionError(error))

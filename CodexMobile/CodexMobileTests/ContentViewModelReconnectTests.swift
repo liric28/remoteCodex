@@ -147,6 +147,62 @@ final class ContentViewModelReconnectTests: XCTestCase {
         XCTAssertFalse(viewModel.isAttemptingManualReconnect)
     }
 
+    func testManualReconnectBacksOffAfterResolvedLiveSessionTimeout() async {
+        let service = makeService()
+        let viewModel = ContentViewModel()
+        let macDeviceID = "mac-\(UUID().uuidString)"
+        let relayURL = "wss://relay.local/relay"
+        var resolveAttempts = 0
+        var attemptedURLs: [String] = []
+        var sleepCount = 0
+
+        service.trustedMacRegistry.records[macDeviceID] = CodexTrustedMacRecord(
+            macDeviceId: macDeviceID,
+            macIdentityPublicKey: Data(repeating: 16, count: 32).base64EncodedString(),
+            lastPairedAt: Date(),
+            relayURL: relayURL
+        )
+        service.lastTrustedMacDeviceId = macDeviceID
+        service.relaySessionId = "saved-session"
+        service.relayUrl = relayURL
+        service.relayMacDeviceId = macDeviceID
+        viewModel.reconnectSleepOverride = { _ in
+            sleepCount += 1
+        }
+        service.trustedSessionResolverOverride = {
+            resolveAttempts += 1
+            return CodexTrustedSessionResolveResponse(
+                ok: true,
+                macDeviceId: macDeviceID,
+                macIdentityPublicKey: Data(repeating: 17, count: 32).base64EncodedString(),
+                displayName: "My Mac",
+                sessionId: "live-session-\(resolveAttempts)"
+            )
+        }
+        viewModel.connectOverride = { _, serverURL in
+            attemptedURLs.append(serverURL)
+            if attemptedURLs.count <= 2 {
+                throw CodexServiceError.invalidInput(
+                    "Connection timed out after 5s while opening the direct relay socket."
+                )
+            }
+        }
+
+        await viewModel.toggleConnection(codex: service)
+
+        XCTAssertEqual(resolveAttempts, 2)
+        XCTAssertEqual(sleepCount, 1)
+        XCTAssertEqual(
+            attemptedURLs,
+            [
+                "\(relayURL)/saved-session",
+                "\(relayURL)/live-session-1",
+                "\(relayURL)/live-session-2",
+            ]
+        )
+        XCTAssertFalse(viewModel.isAttemptingManualReconnect)
+    }
+
     func testManualReconnectCancelsStuckTrustedSessionResolve() async {
         let service = makeService()
         let viewModel = ContentViewModel()
