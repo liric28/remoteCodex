@@ -561,16 +561,6 @@ function readBridgeConfig({
   const defaultRefreshEnabled = false;
   return {
     relayUrl,
-    relayDnsOverrides: readFirstDefinedEnv(
-      ["REMODEX_RELAY_DNS_OVERRIDES"],
-      readString(daemonConfig.relayDnsOverrides) || "",
-      env
-    ),
-    relayDnsMode: readFirstDefinedEnv(
-      ["REMODEX_RELAY_DNS_MODE"],
-      readString(daemonConfig.relayDnsMode) || "",
-      env
-    ),
     pushServiceUrl: readFirstDefinedEnv(
       ["REMODEX_PUSH_SERVICE_URL"],
       defaultPushServiceUrl,

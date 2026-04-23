@@ -17,8 +17,6 @@ final class ContentViewModel {
     private(set) var isRunningAutoReconnect = false
     private(set) var isRunningManualReconnect = false
     private var shouldCancelManualReconnect = false
-    private var shouldResolveTrustedSessionBeforeNextConnect = false
-    private var didUseSavedSessionFastPathForCurrentConnect = false
     // Test hooks keep reconnect verification fast without changing production retry behavior.
     @ObservationIgnored var reconnectAttemptLimitOverride: Int?
     @ObservationIgnored var connectOverride: ((CodexService, String) async throws -> Void)?
@@ -118,8 +116,6 @@ final class ContentViewModel {
         codex.connectionRecoveryState = .retrying(attempt: 0, message: "Preparing reconnect...")
         codex.lastErrorMessage = nil
         codex.cancelTrustedSessionResolve()
-        shouldResolveTrustedSessionBeforeNextConnect = false
-        didUseSavedSessionFastPathForCurrentConnect = false
 
         if codex.isConnecting || codex.isConnected {
             await codex.disconnect()
@@ -137,8 +133,6 @@ final class ContentViewModel {
         codex.connectionRecoveryState = .idle
         codex.lastErrorMessage = nil
         codex.cancelTrustedSessionResolve()
-        shouldResolveTrustedSessionBeforeNextConnect = false
-        didUseSavedSessionFastPathForCurrentConnect = false
 
         // Cancel any in-flight reconnect so the scanner can appear immediately instead of waiting
         // for a stalled handshake to time out on its own.
@@ -219,8 +213,6 @@ final class ContentViewModel {
                     message: "Reconnecting..."
                 )
                 try await connect(codex: codex, serverURL: fullURL)
-                shouldResolveTrustedSessionBeforeNextConnect = false
-                didUseSavedSessionFastPathForCurrentConnect = false
                 codex.connectionRecoveryState = .idle
                 codex.lastErrorMessage = nil
                 codex.shouldAutoReconnectOnForeground = false
@@ -256,21 +248,11 @@ final class ContentViewModel {
                     return
                 }
 
-                let shouldResolveTrustedSessionImmediately = shouldResolveTrustedSessionAfterFailedSavedConnect(
-                    error,
-                    codex: codex
-                )
-                if shouldResolveTrustedSessionImmediately {
-                    shouldResolveTrustedSessionBeforeNextConnect = true
-                }
                 codex.lastErrorMessage = nil
                 codex.connectionRecoveryState = .retrying(
                     attempt: attempt + 1,
                     message: codex.recoveryStatusMessage(for: error)
                 )
-                if shouldResolveTrustedSessionImmediately {
-                    continue
-                }
 
                 let backoffIndex = min(attempt, autoReconnectBackoffNanoseconds.count - 1)
                 let backoff = autoReconnectBackoffNanoseconds[backoffIndex]
@@ -354,8 +336,6 @@ extension ContentViewModel {
 
             do {
                 try await connect(codex: codex, serverURL: serverURL)
-                shouldResolveTrustedSessionBeforeNextConnect = false
-                didUseSavedSessionFastPathForCurrentConnect = false
                 codex.connectionRecoveryState = .idle
                 codex.lastErrorMessage = nil
                 codex.shouldAutoReconnectOnForeground = false
@@ -389,21 +369,11 @@ extension ContentViewModel {
                     throw error
                 }
 
-                let shouldResolveTrustedSessionImmediately = shouldResolveTrustedSessionAfterFailedSavedConnect(
-                    error,
-                    codex: codex
-                )
-                if shouldResolveTrustedSessionImmediately {
-                    shouldResolveTrustedSessionBeforeNextConnect = true
-                }
                 codex.lastErrorMessage = nil
                 codex.connectionRecoveryState = .retrying(
                     attempt: attemptIndex + 1,
                     message: codex.recoveryStatusMessage(for: error)
                 )
-                if shouldResolveTrustedSessionImmediately {
-                    continue
-                }
                 await sleepForReconnectBackoff(
                     autoReconnectBackoffNanoseconds[attemptIndex],
                     continueWhile: shouldContinue
@@ -419,41 +389,16 @@ extension ContentViewModel {
         }
     }
 
-    // Chooses the fastest reconnect path: try the saved relay session first, then resolve a live trusted-Mac
-    // session after the relay proves the saved one is unavailable.
+    // Chooses the best reconnect path: resolve the live trusted-Mac session first, then fall back to the saved QR session.
     func preferredReconnectURL(codex: CodexService) async -> String? {
-        if codex.hasSavedRelaySession && !shouldResolveTrustedSessionBeforeNextConnect {
-            codex.lastErrorMessage = nil
-            didUseSavedSessionFastPathForCurrentConnect = true
-            return savedReconnectURL(codex: codex)
-        }
-
         switch await trustedReconnectResolution(codex: codex) {
         case .use(let resolvedURL):
-            shouldResolveTrustedSessionBeforeNextConnect = false
-            didUseSavedSessionFastPathForCurrentConnect = false
             return resolvedURL
         case .fallbackToSaved:
-            didUseSavedSessionFastPathForCurrentConnect = false
             return savedReconnectURL(codex: codex)
         case .stop:
-            didUseSavedSessionFastPathForCurrentConnect = false
             return nil
         }
-    }
-
-    // A saved session can be stale without returning the relay's 4002 close code; local/private relay
-    // paths often surface that as an open timeout. Resolve the live trusted session immediately once
-    // before spending another backoff cycle on the same cached socket URL.
-    private func shouldResolveTrustedSessionAfterFailedSavedConnect(
-        _ error: Error,
-        codex: CodexService
-    ) -> Bool {
-        codex.hasTrustedMacReconnectCandidate
-            && didUseSavedSessionFastPathForCurrentConnect
-            && !shouldResolveTrustedSessionBeforeNextConnect
-            && (codex.isRetryableSavedSessionConnectError(error)
-                || codex.isRecoverableTransientConnectionError(error))
     }
 
     // Resolves a trusted-Mac session when possible and tells the caller whether to use, fall back, or stop.
@@ -502,12 +447,6 @@ extension ContentViewModel {
             }
             return .fallbackToSaved
         case .macOffline(let message):
-            if shouldResolveTrustedSessionBeforeNextConnect {
-                codex.connectionRecoveryState = .idle
-                codex.shouldAutoReconnectOnForeground = false
-                codex.lastErrorMessage = macBridgeRestartInstructionMessage(message)
-                return .stop
-            }
             if codex.hasSavedRelaySession {
                 codex.lastErrorMessage = nil
                 return .fallbackToSaved

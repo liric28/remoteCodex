@@ -23,7 +23,7 @@ final class ContentViewModelReconnectTests: XCTestCase {
         super.tearDown()
     }
 
-    func testPreferredReconnectURLUsesSavedSessionFastPathBeforeTrustedResolve() async {
+    func testPreferredReconnectURLResolvesTrustedSessionBeforeSavedFallback() async {
         let service = makeService()
         let viewModel = ContentViewModel()
         let macDeviceID = "mac-\(UUID().uuidString)"
@@ -43,13 +43,19 @@ final class ContentViewModelReconnectTests: XCTestCase {
         service.lastErrorMessage = "stale error"
         service.trustedSessionResolverOverride = {
             resolveAttempts += 1
-            throw CodexTrustedSessionResolveError.macOffline("Your trusted Mac is offline right now.")
+            return CodexTrustedSessionResolveResponse(
+                ok: true,
+                macDeviceId: macDeviceID,
+                macIdentityPublicKey: Data(repeating: 10, count: 32).base64EncodedString(),
+                displayName: "My Mac",
+                sessionId: "live-session"
+            )
         }
 
         let reconnectURL = await viewModel.preferredReconnectURL(codex: service)
 
-        XCTAssertEqual(reconnectURL, "\(relayURL)/saved-session")
-        XCTAssertEqual(resolveAttempts, 0)
+        XCTAssertEqual(reconnectURL, "\(relayURL)/live-session")
+        XCTAssertEqual(resolveAttempts, 1)
         XCTAssertNil(service.lastErrorMessage)
     }
 
@@ -102,7 +108,7 @@ final class ContentViewModelReconnectTests: XCTestCase {
         XCTAssertEqual(service.connectionRecoveryState, .retrying(attempt: 2, message: "Reconnecting..."))
     }
 
-    func testManualReconnectResolvesTrustedSessionImmediatelyAfterSavedSessionTimeout() async {
+    func testManualReconnectUsesResolvedTrustedSessionBeforeSavedSession() async {
         let service = makeService()
         let viewModel = ContentViewModel()
         let macDeviceID = "mac-\(UUID().uuidString)"
@@ -133,11 +139,6 @@ final class ContentViewModelReconnectTests: XCTestCase {
         }
         viewModel.connectOverride = { _, serverURL in
             attemptedURLs.append(serverURL)
-            if attemptedURLs.count == 1 {
-                throw CodexServiceError.invalidInput(
-                    "Connection timed out after 5s while opening the direct relay socket."
-                )
-            }
         }
 
         await viewModel.toggleConnection(codex: service)
@@ -145,12 +146,12 @@ final class ContentViewModelReconnectTests: XCTestCase {
         XCTAssertEqual(resolveAttempts, 1)
         XCTAssertEqual(
             attemptedURLs,
-            ["\(relayURL)/saved-session", "\(relayURL)/live-session"]
+            ["\(relayURL)/live-session"]
         )
         XCTAssertFalse(viewModel.isAttemptingManualReconnect)
     }
 
-    func testManualReconnectResolvesTrustedSessionImmediatelyAfterSavedSessionSecureTimeout() async {
+    func testManualReconnectFallsBackToSavedSessionWhenTrustedResolveIsUnsupported() async {
         let service = makeService()
         let viewModel = ContentViewModel()
         let macDeviceID = "mac-\(UUID().uuidString)"
@@ -171,21 +172,10 @@ final class ContentViewModelReconnectTests: XCTestCase {
         viewModel.reconnectSleepOverride = { _ in }
         service.trustedSessionResolverOverride = {
             resolveAttempts += 1
-            return CodexTrustedSessionResolveResponse(
-                ok: true,
-                macDeviceId: macDeviceID,
-                macIdentityPublicKey: Data(repeating: 19, count: 32).base64EncodedString(),
-                displayName: "My Mac",
-                sessionId: "live-session"
-            )
+            throw CodexTrustedSessionResolveError.unsupportedRelay
         }
         viewModel.connectOverride = { _, serverURL in
             attemptedURLs.append(serverURL)
-            if attemptedURLs.count == 1 {
-                throw CodexSecureTransportError.timedOut(
-                    "Timed out waiting for the secure Remodex serverHello message."
-                )
-            }
         }
 
         await viewModel.toggleConnection(codex: service)
@@ -193,12 +183,12 @@ final class ContentViewModelReconnectTests: XCTestCase {
         XCTAssertEqual(resolveAttempts, 1)
         XCTAssertEqual(
             attemptedURLs,
-            ["\(relayURL)/saved-session", "\(relayURL)/live-session"]
+            ["\(relayURL)/saved-session"]
         )
         XCTAssertFalse(viewModel.isAttemptingManualReconnect)
     }
 
-    func testManualReconnectStopsWithMacRestartInstructionAfterSavedSessionSecureTimeoutWhenMacIsOffline() async {
+    func testManualReconnectFallsBackToSavedSessionWhenTrustedMacIsOfflineButSavedSessionExists() async {
         let service = makeService()
         let viewModel = ContentViewModel()
         let macDeviceID = "mac-\(UUID().uuidString)"
@@ -223,20 +213,13 @@ final class ContentViewModelReconnectTests: XCTestCase {
         }
         viewModel.connectOverride = { _, serverURL in
             attemptedURLs.append(serverURL)
-            throw CodexSecureTransportError.timedOut(
-                "Timed out waiting for the secure Remodex serverHello message."
-            )
         }
 
         await viewModel.toggleConnection(codex: service)
 
         XCTAssertEqual(resolveAttempts, 1)
         XCTAssertEqual(attemptedURLs, ["\(relayURL)/saved-session"])
-        XCTAssertEqual(
-            service.lastErrorMessage,
-            "Your trusted Mac is offline right now. On your Mac, run `remodex status`. If the bridge is stopped or stuck, run `remodex restart`."
-        )
-        XCTAssertFalse(service.shouldAutoReconnectOnForeground)
+        XCTAssertNil(service.lastErrorMessage)
         XCTAssertFalse(viewModel.isAttemptingManualReconnect)
     }
 
@@ -283,14 +266,14 @@ final class ContentViewModelReconnectTests: XCTestCase {
 
         await viewModel.toggleConnection(codex: service)
 
-        XCTAssertEqual(resolveAttempts, 2)
-        XCTAssertEqual(sleepCount, 1)
+        XCTAssertEqual(resolveAttempts, 3)
+        XCTAssertEqual(sleepCount, 2)
         XCTAssertEqual(
             attemptedURLs,
             [
-                "\(relayURL)/saved-session",
                 "\(relayURL)/live-session-1",
                 "\(relayURL)/live-session-2",
+                "\(relayURL)/live-session-3",
             ]
         )
         XCTAssertFalse(viewModel.isAttemptingManualReconnect)
