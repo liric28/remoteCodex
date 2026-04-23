@@ -67,6 +67,9 @@ description: Use when the user wants to clear stale Remodex relay state, undo a 
 如果用户问的是“之前公司里那个 TLS / 代理问题到底是怎么绕过去的”，读
 `references/tls_proxy_bypass.md`。
 
+如果用户要看这次 Remodex 连接失败排查的完整过程、错误方向、排除项和最终收敛过程，读
+`references/debug_timeline_2026-04-24.md`。
+
 ## 直接执行
 
 优先用脚本：
