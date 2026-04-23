@@ -78,6 +78,7 @@ struct SettingsView: View {
         .id("settings-language-\(appLanguageRawValue)")
         .font(AppFont.body())
         .navigationTitle(L("Settings", "设置"))
+        .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $isShowingMacNameSheet) {
             if let trustedPairPresentation = codex.trustedPairPresentation {
                 SettingsMacNameSheet(
