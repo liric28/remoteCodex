@@ -64,6 +64,9 @@ description: Use when the user wants to clear stale Remodex relay state, undo a 
 - WebSocket Upgrade 正常转发
 - 路径转发正确，最终 Node relay 仍收到 `/relay/...`
 
+如果用户问的是“之前公司里那个 TLS / 代理问题到底是怎么绕过去的”，读
+`references/tls_proxy_bypass.md`。
+
 ## 直接执行
 
 优先用脚本：
