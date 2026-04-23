@@ -5,6 +5,7 @@
 // Depends on: CodexService, Sidebar* components/helpers
 
 import SwiftUI
+import UIKit
 
 struct SidebarView: View {
     @Environment(CodexService.self) private var codex
@@ -35,6 +36,7 @@ struct SidebarView: View {
     @State private var sidebarDebugSequence = 0
     @State private var isOpeningSettings = false
     @State private var lastSettingsOpenAt: Date? = nil
+    @State private var keyboardBottomInset: CGFloat = 0
 
     var body: some View {
         let diffTotalsByThreadID = cachedDiffTotals
@@ -98,26 +100,21 @@ struct SidebarView: View {
                 await refreshThreads()
             }
 
-            HStack(spacing: 10) {
-                SidebarFloatingSettingsButton(
-                    colorScheme: colorScheme,
-                    isDisabled: isOpeningSettings,
-                    action: openSettings
-                )
-                Spacer(minLength: 0)
-                if let trustedPairPresentation = codex.trustedPairPresentation {
-                    SidebarMacConnectionStatusView(
-                        name: trustedPairPresentation.name,
-                        systemName: trustedPairPresentation.systemName,
-                        isConnected: codex.isConnected
-                    )
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
+            sidebarFooter
         }
         .frame(maxHeight: .infinity)
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .background(Color(.systemBackground))
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+            animateWithKeyboardNotification(notification) { keyboardFrame in
+                keyboardBottomInset = keyboardOverlapHeight(for: keyboardFrame)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { notification in
+            animateWithKeyboardNotification(notification) { _ in
+                keyboardBottomInset = 0
+            }
+        }
         .task {
             debugSidebarLog("task start visible=\(isVisible) threadCount=\(codex.threads.count)")
             rebuildGroupedThreads()
@@ -251,6 +248,27 @@ struct SidebarView: View {
         }
     }
 
+    private var sidebarFooter: some View {
+        HStack(spacing: 10) {
+            SidebarFloatingSettingsButton(
+                colorScheme: colorScheme,
+                isDisabled: isOpeningSettings,
+                action: openSettings
+            )
+            Spacer(minLength: 0)
+            if let trustedPairPresentation = codex.trustedPairPresentation {
+                SidebarMacConnectionStatusView(
+                    name: trustedPairPresentation.name,
+                    systemName: trustedPairPresentation.systemName,
+                    isConnected: codex.isConnected
+                )
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .offset(y: -keyboardBottomInset)
+    }
+
     // Shows a native sheet so folder names and full paths stay readable on small screens.
     private func handleNewChatButtonTap() {
         if newChatProjectChoices.isEmpty {
@@ -305,6 +323,40 @@ struct SidebarView: View {
         debugSidebarLog("selectThread id=\(thread.id) title=\(thread.displayTitle)")
         searchText = ""
         onOpenThread(thread)
+    }
+
+    private func animateWithKeyboardNotification(
+        _ notification: Notification,
+        animations: @escaping (CGRect) -> Void,
+        completion: ((Bool) -> Void)? = nil
+    ) {
+        let userInfo = notification.userInfo ?? [:]
+        let keyboardFrame = (userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect) ?? .zero
+        let duration = (userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
+        let curveValue = (userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? Int) ?? UIView.AnimationCurve.easeInOut.rawValue
+        let curve = UIView.AnimationCurve(rawValue: curveValue) ?? .easeInOut
+
+        let animator = UIViewPropertyAnimator(duration: duration, curve: curve) {
+            animations(keyboardFrame)
+        }
+        if let completion {
+            animator.addCompletion { _ in
+                completion(true)
+            }
+        }
+        animator.startAnimation()
+    }
+
+    private func keyboardOverlapHeight(for keyboardFrame: CGRect) -> CGFloat {
+        max(0, UIScreen.main.bounds.height - keyboardFrame.minY - bottomSafeAreaInset)
+    }
+
+    private var bottomSafeAreaInset: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .safeAreaInsets.bottom ?? 0
     }
 
     private func openSettings() {

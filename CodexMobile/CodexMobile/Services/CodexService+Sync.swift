@@ -380,7 +380,7 @@ extension CodexService {
                 _ = try await self.sendRequest(
                     method: "thread/name/set",
                     params: .object([
-                        "thread_id": .string(threadId),
+                        "threadId": .string(threadId),
                         "name": .string(name),
                     ])
                 )
