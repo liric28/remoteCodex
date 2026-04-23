@@ -120,7 +120,7 @@ private let exactLocalizedAppMessages: [String: String] = [
     "Could not reconnect. Tap Reconnect to try again.": "无法重新连接。点按“重新连接”再试一次。",
     "Connection timed out. Check server/network.": "连接超时。请检查服务器或网络。",
     "Connection timed out. Retrying...": "连接超时，正在重试...",
-    "Connection timed out after 5s": "连接超时，已等待 5 秒。",
+    "Connection timed out after 12s": "连接超时，已等待 12 秒。",
     "Could not resolve that pairing code.": "无法解析该配对码。",
     "Enter a valid pairing code.": "请输入有效的配对码。",
     "Trying to wake your Mac display...": "正在尝试唤醒 Mac 显示器...",
@@ -187,12 +187,12 @@ private func localizedPrefixedAppMessage(_ message: String) -> String? {
         return "无法连接中继服务器：\(relayURL)。请确认 iPhone 可以通过本地网络访问 Mac。"
     }
 
-    if message.hasPrefix("Connection timed out after 5s while opening the direct relay socket.") {
-        return "连接中继超时，已等待 5 秒。"
+    if message.hasPrefix("Connection timed out after 12s while opening the direct relay socket.") {
+        return "连接中继超时，已等待 12 秒。"
     }
 
-    if message.hasPrefix("Connection timed out after 5s while opening the relay websocket.") {
-        return "连接中继超时，已等待 5 秒。"
+    if message.hasPrefix("Connection timed out after 12s while opening the relay websocket.") {
+        return "连接中继超时，已等待 12 秒。"
     }
 
     if let suffix = message.removingPrefix("Cannot resolve server host ("),

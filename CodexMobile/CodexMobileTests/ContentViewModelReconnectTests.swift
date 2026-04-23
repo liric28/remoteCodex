@@ -259,7 +259,7 @@ final class ContentViewModelReconnectTests: XCTestCase {
             attemptedURLs.append(serverURL)
             if attemptedURLs.count <= 2 {
                 throw CodexServiceError.invalidInput(
-                    "Connection timed out after 5s while opening the direct relay socket."
+                    "Connection timed out after 12s while opening the direct relay socket."
                 )
             }
         }

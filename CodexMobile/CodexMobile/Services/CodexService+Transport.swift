@@ -13,8 +13,6 @@ import Security
 // Image-heavy thread history and secure-envelope overhead can legitimately exceed 4 MB while
 // reopening a chat, so the limit needs enough headroom for background `thread/read` catches too.
 let codexWebSocketMaximumMessageSizeBytes = 16 * 1024 * 1024
-private let codexWebSocketConnectionTimeoutNanoseconds: UInt64 = 5_000_000_000
-private let codexWebSocketConnectionTimeoutSeconds = 5
 
 private enum CodexRelayTransportPreference {
     case manualTCP
@@ -347,8 +345,8 @@ extension CodexService {
         let connection = NWConnection(host: NWEndpoint.Host(endpoint.host), port: endpoint.port, using: parameters)
         let waitConfiguration = CodexConnectionReadyWaitConfiguration(
             logLabel: "manual TCP websocket",
-            timeoutNanoseconds: codexWebSocketConnectionTimeoutNanoseconds,
-            timeoutMessage: "Connection timed out after \(codexWebSocketConnectionTimeoutSeconds)s while opening the direct relay socket."
+            timeoutNanoseconds: 12_000_000_000,
+            timeoutMessage: "Connection timed out after 12s while opening the direct relay socket."
         )
 
         codexLogPairingTransport("opening manual TCP websocket")
@@ -413,8 +411,8 @@ extension CodexService {
         let connection = NWConnection(to: .url(url), using: parameters)
         let waitConfiguration = CodexConnectionReadyWaitConfiguration(
             logLabel: "NWConnection websocket",
-            timeoutNanoseconds: codexWebSocketConnectionTimeoutNanoseconds,
-            timeoutMessage: "Connection timed out after \(codexWebSocketConnectionTimeoutSeconds)s while opening the relay websocket."
+            timeoutNanoseconds: 12_000_000_000,
+            timeoutMessage: "Connection timed out after 12s while opening the relay websocket."
         )
 
         try await waitUntilConnectionReady(connection, configuration: waitConfiguration)
@@ -465,20 +463,18 @@ extension CodexService {
         let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
         let task = session.webSocketTask(with: request)
         task.maximumMessageSize = codexWebSocketMaximumMessageSizeBytes
+        let connectionTimeoutNanoseconds: UInt64 = 12_000_000_000
+
         codexLogPairingTransport("opening URLSessionWebSocketTask")
         task.resume()
         webSocketSessionDelegate = delegate
 
         let timeoutTask = Task { [weak task, weak delegate] in
-            try? await Task.sleep(nanoseconds: codexWebSocketConnectionTimeoutNanoseconds)
+            try? await Task.sleep(nanoseconds: connectionTimeoutNanoseconds)
             guard !Task.isCancelled else { return }
             task?.cancel(with: .goingAway, reason: nil)
             delegate?.resolveOpen(
-                with: .failure(
-                    CodexServiceError.invalidInput(
-                        "Connection timed out after \(codexWebSocketConnectionTimeoutSeconds)s"
-                    )
-                )
+                with: .failure(CodexServiceError.invalidInput("Connection timed out after 12s"))
             )
         }
         defer { timeoutTask.cancel() }
