@@ -447,12 +447,6 @@ extension ContentViewModel {
             }
             return .fallbackToSaved
         case .macOffline(let message):
-            if shouldResolveTrustedSessionBeforeNextConnect {
-                codex.connectionRecoveryState = .idle
-                codex.shouldAutoReconnectOnForeground = false
-                codex.lastErrorMessage = macBridgeRestartInstructionMessage(message)
-                return .stop
-            }
             if codex.hasSavedRelaySession {
                 codex.lastErrorMessage = nil
                 return .fallbackToSaved
