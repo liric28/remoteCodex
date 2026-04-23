@@ -34,6 +34,7 @@ struct SidebarView: View {
     @State private var lastBadgeFingerprint: Int = 0
     @State private var sidebarDebugSequence = 0
     @State private var isOpeningSettings = false
+    @State private var lastSettingsOpenAt: Date? = nil
 
     var body: some View {
         let diffTotalsByThreadID = cachedDiffTotals
@@ -308,6 +309,11 @@ struct SidebarView: View {
 
     private func openSettings() {
         guard !isOpeningSettings else { return }
+        let now = Date()
+        if let lastSettingsOpenAt, now.timeIntervalSince(lastSettingsOpenAt) < 0.5 {
+            return
+        }
+        lastSettingsOpenAt = now
         isOpeningSettings = true
         searchText = ""
         showSettings = true

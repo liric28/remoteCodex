@@ -1,6 +1,10 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+#if canImport(UIKit)
+  import UIKit
+#endif
+
 extension StructuredText {
   /// A proxy for a rendered code block that custom code block styles can use.
   public struct CodeBlockProxy {
@@ -13,6 +17,7 @@ extension StructuredText {
     /// Copies the code block contents to the system pasteboard.
     ///
     /// Textual writes both a plain-text and an HTML representation when possible.
+    @MainActor
     @available(tvOS, unavailable)
     @available(watchOS, unavailable)
     public func copyToPasteboard() {
