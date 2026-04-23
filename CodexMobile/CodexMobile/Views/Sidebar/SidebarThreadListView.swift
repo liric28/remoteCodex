@@ -31,6 +31,8 @@ struct SidebarThreadListView: View {
     @State private var expandedSubagentParentIDs: Set<String> = []
     // Tracks project sections whose preview cap was manually lifted with Show more.
     @State private var revealedProjectGroupIDs: Set<String> = []
+    @State private var renamePrompt = ThreadRenamePromptState()
+    @State private var threadPendingRename: CodexThread? = nil
 
     var body: some View {
         ScrollView {
@@ -80,6 +82,16 @@ struct SidebarThreadListView: View {
         .onChange(of: selectedSubagentAncestorIDs) { _, _ in
             revealSelectedThreadProjectGroup()
             revealSelectedSubagentAncestors()
+        }
+        .threadRenamePrompt(state: $renamePrompt) { newName in
+            guard let thread = threadPendingRename else { return }
+            onRenameThread?(thread, newName)
+            threadPendingRename = nil
+        }
+        .onChange(of: renamePrompt.isPresented) { _, isPresented in
+            if !isPresented {
+                threadPendingRename = nil
+            }
         }
     }
 
@@ -329,10 +341,15 @@ struct SidebarThreadListView: View {
                     onSelectThread(thread)
                 }
             },
-            onRename: onRenameThread.map { handler in { newName in handler(thread, newName) } },
+            onRenameRequest: onRenameThread.map { _ in { presentRenamePrompt(for: thread) } },
             onArchiveToggle: onArchiveToggleThread.map { handler in { handler(thread) } },
             onDelete: onDeleteThread.map { handler in { handler(thread) } }
         )
+    }
+
+    private func presentRenamePrompt(for thread: CodexThread) {
+        threadPendingRename = thread
+        renamePrompt.present(currentTitle: thread.displayTitle)
     }
 
     // Preloads metadata only for subagent rows that are currently reachable in the sidebar tree.

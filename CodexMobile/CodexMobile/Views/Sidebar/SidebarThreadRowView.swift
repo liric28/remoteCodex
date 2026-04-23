@@ -15,11 +15,10 @@ struct SidebarThreadRowView: View {
     let isSubagentExpanded: Bool
     let onToggleSubagents: (() -> Void)?
     let onTap: () -> Void
-    var onRename: ((String) -> Void)? = nil
+    var onRenameRequest: (() -> Void)? = nil
     var onArchiveToggle: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
 
-    @State private var renamePrompt = ThreadRenamePromptState()
     private let titleLeadingSlotWidth: CGFloat = 16
 
     var body: some View {
@@ -38,9 +37,6 @@ struct SidebarThreadRowView: View {
         }
         .padding(.horizontal, 12)
         .contextMenu { contextMenuContent }
-        .threadRenamePrompt(state: $renamePrompt) { newName in
-            onRename?(newName)
-        }
     }
 
     // MARK: - Parent row (no CodexService dependency)
@@ -210,10 +206,10 @@ struct SidebarThreadRowView: View {
 
     @ViewBuilder
     private var contextMenuContent: some View {
-        if onRename != nil {
+        if let onRenameRequest {
             Button {
                 HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                renamePrompt.present(currentTitle: thread.displayTitle)
+                onRenameRequest()
             } label: {
                 Label("Rename", systemImage: "pencil")
             }

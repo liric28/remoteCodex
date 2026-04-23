@@ -33,6 +33,7 @@ extension StructuredText {
             ]
           ]
         )
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
       #endif
     }
   }
