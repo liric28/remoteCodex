@@ -232,7 +232,7 @@ struct SettingsView: View {
             if let error = codex.lastErrorMessage, !error.isEmpty {
                 Text(localizedAppMessage(error))
                     .font(AppFont.caption())
-                    .foregroundStyle(.red)
+                    .foregroundStyle(isMacBridgeRestartInstructionMessage(error) ? Color(.systemYellow) : .red)
             }
 
             Divider()

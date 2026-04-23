@@ -79,6 +79,35 @@ final class DesktopHandoffServiceTests: XCTestCase {
         }
     }
 
+    func testWakeDisplayShowsMacRestartInstructionWhenTrustedMacIsOffline() async {
+        let service = makeService()
+        let macDeviceID = "mac-\(UUID().uuidString)"
+        let relayURL = "wss://relay.local/relay"
+        service.trustedMacRegistry.records[macDeviceID] = CodexTrustedMacRecord(
+            macDeviceId: macDeviceID,
+            macIdentityPublicKey: Data(repeating: 21, count: 32).base64EncodedString(),
+            lastPairedAt: Date(),
+            relayURL: relayURL
+        )
+        service.lastTrustedMacDeviceId = macDeviceID
+        service.trustedSessionResolverOverride = {
+            throw CodexTrustedSessionResolveError.macOffline("Your trusted Mac is offline right now.")
+        }
+        let handoff = DesktopHandoffService(codex: service)
+
+        do {
+            try await handoff.wakeDisplay()
+            XCTFail("Expected wakeDisplay to fail when the trusted Mac is offline.")
+        } catch let error as DesktopHandoffError {
+            XCTAssertEqual(
+                error.errorDescription,
+                "Your trusted Mac is offline right now. On your Mac, run `remodex status`. If the bridge is stopped or stuck, run `remodex restart`."
+            )
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     private func makeService() -> CodexService {
         let suiteName = "DesktopHandoffServiceTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName) ?? .standard

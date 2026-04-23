@@ -67,6 +67,10 @@ func L(_ en: String, _ zh: String) -> String {
     AppLanguage.current.effectiveLanguage == .chinese ? zh : en
 }
 
+func macBridgeRestartInstructionMessage(_ message: String) -> String {
+    "\(message) On your Mac, run `remodex status`. If the bridge is stopped or stuck, run `remodex restart`."
+}
+
 func localizedAppMessage(_ message: String) -> String {
     guard AppLanguage.current.effectiveLanguage == .chinese else {
         return message
@@ -99,6 +103,15 @@ func localizedAppMessage(_ message: String) -> String {
     }
 
     return message
+}
+
+func isMacBridgeRestartInstructionMessage(_ message: String?) -> Bool {
+    guard let message = message?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !message.isEmpty else {
+        return false
+    }
+
+    return message.localizedCaseInsensitiveContains("remodex restart")
 }
 
 private let exactLocalizedAppMessages: [String: String] = [
@@ -199,6 +212,10 @@ private func localizedPrefixedAppMessage(_ message: String) -> String? {
 
     if let suffix = message.removingPrefix("Queue paused: ") {
         return "队列已暂停：\(localizedAppMessage(suffix))"
+    }
+
+    if let prefix = message.removingSuffix(" On your Mac, run `remodex status`. If the bridge is stopped or stuck, run `remodex restart`.") {
+        return "\(localizedAppMessage(prefix)) 请在 Mac 上运行 `remodex status`。如果桥接已停止或卡住，请运行 `remodex restart`。"
     }
 
     if message.hasPrefix("This Mac bridge requires Remodex iPhone ")

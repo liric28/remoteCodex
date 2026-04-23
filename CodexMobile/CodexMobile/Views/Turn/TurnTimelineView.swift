@@ -354,7 +354,7 @@ private struct TurnTimelineFooterContainer<Composer: View>: View {
             if !hidesErrorMessage, let errorMessage, !errorMessage.isEmpty {
                 Text(localizedAppMessage(errorMessage))
                     .font(AppFont.caption())
-                    .foregroundStyle(.red)
+                    .foregroundStyle(isMacBridgeRestartInstructionMessage(errorMessage) ? Color(.systemYellow) : .red)
                     .padding(.horizontal, 16)
                     .padding(.top, 4)
             }

@@ -230,6 +230,19 @@ final class CodexServiceConnectionErrorTests: XCTestCase {
         )
     }
 
+    func testSecureHandshakeTimeoutRemainsRetryable() {
+        let service = CodexService()
+        let error = CodexSecureTransportError.timedOut(
+            "Timed out waiting for the secure Remodex serverHello message."
+        )
+
+        XCTAssertTrue(service.isRecoverableTransientConnectionError(error))
+        XCTAssertEqual(
+            service.userFacingConnectFailureMessage(error),
+            "Connection timed out. Check server/network."
+        )
+    }
+
     func testPrepareForConnectionAttemptPreservesFreshQRHandshakeState() async {
         let service = CodexService()
         let payload = CodexPairingQRPayload(

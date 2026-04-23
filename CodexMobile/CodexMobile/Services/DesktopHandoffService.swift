@@ -174,11 +174,23 @@ final class DesktopHandoffService {
                     break
                 }
 
-                throw DesktopHandoffError.bridgeError(code: nil, message: error.localizedDescription)
+                throw DesktopHandoffError.bridgeError(
+                    code: nil,
+                    message: wakeRecoveryMessage(for: error)
+                )
             }
         }
 
         return savedReconnectURL
+    }
+
+    private func wakeRecoveryMessage(for error: CodexTrustedSessionResolveError) -> String {
+        switch error {
+        case .macOffline(let message):
+            return macBridgeRestartInstructionMessage(message)
+        default:
+            return error.localizedDescription
+        }
     }
 }
 
