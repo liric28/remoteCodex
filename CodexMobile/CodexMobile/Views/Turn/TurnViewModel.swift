@@ -2142,6 +2142,14 @@ final class TurnViewModel {
                         )
                     }
 
+                case .pull:
+                    let result = try await gitService.pull()
+                    if let status = result.status {
+                        applyGitRepoSync(status)
+                    } else if let statusAfter = try? await gitService.status() {
+                        applyGitRepoSync(statusAfter)
+                    }
+
                 case .commit:
                     let result = try await gitService.commit(message: nil)
                     let statusAfter = try? await gitService.status()

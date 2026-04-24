@@ -316,6 +316,7 @@ private extension GitBranchesWithStatusResult {
 
 enum TurnGitActionKind: CaseIterable, Sendable {
     case syncNow
+    case pull
     case commit
     case push
     case commitAndPush
@@ -325,6 +326,7 @@ enum TurnGitActionKind: CaseIterable, Sendable {
     var title: String {
         switch self {
         case .syncNow: return "Update"
+        case .pull: return "Pull"
         case .commit: return "Commit"
         case .push: return "Push"
         case .commitAndPush: return "Commit & Push"

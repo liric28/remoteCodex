@@ -12,6 +12,8 @@ extension TurnGitActionKind {
         switch self {
         case .syncNow:
             return Self.resizedSymbol(named: "arrow.trianglehead.2.clockwise.rotate.90", size: cgSize)
+        case .pull:
+            return Self.resizedSymbol(named: "arrow.down.circle", size: cgSize)
         case .commit:
             return Self.resizedAsset(named: "git-commit", size: cgSize)
         case .push:
@@ -99,7 +101,7 @@ struct TurnGitActionsToolbarButton: View {
             }
 
             Section("Write") {
-                ForEach([TurnGitActionKind.commit, .push, .commitAndPush, .createPR], id: \.self) { action in
+                ForEach([TurnGitActionKind.pull, .commit, .push, .commitAndPush, .createPR], id: \.self) { action in
                     actionButton(for: action)
                 }
             }
