@@ -136,7 +136,9 @@ test("readBridgeConfig uses only the packaged relay default outside a source che
   );
 
   const config = readBridgeConfig({
-    env: {},
+    env: {
+      REMODEX_DEVICE_STATE_DIR: path.join(tempRoot, ".remodex-state"),
+    },
     runtimeRoot: tempRoot,
     fsImpl: fs,
   });
@@ -159,7 +161,9 @@ test("readBridgeConfig uses a packaged push default only when it is explicitly p
   );
 
   const config = readBridgeConfig({
-    env: {},
+    env: {
+      REMODEX_DEVICE_STATE_DIR: path.join(tempRoot, ".remodex-state"),
+    },
     runtimeRoot: tempRoot,
     fsImpl: fs,
   });
@@ -180,6 +184,30 @@ test("readBridgeConfig does not use the hosted fallback inside a source checkout
   });
 
   assert.equal(config.relayUrl, "");
+  assert.equal(config.pushServiceUrl, "");
+});
+
+test("readBridgeConfig reuses a persisted relay inside a source checkout", () => {
+  const config = readBridgeConfig({
+    env: {
+      REMODEX_DEVICE_STATE_DIR: "/tmp/remodex-state",
+    },
+    runtimeRoot: "/workspace/phodex-bridge",
+    fsImpl: {
+      existsSync(targetPath) {
+        return targetPath === "/workspace/.git"
+          || targetPath === "/tmp/remodex-state/daemon-config.json";
+      },
+      readFileSync(targetPath) {
+        if (targetPath === "/tmp/remodex-state/daemon-config.json") {
+          return JSON.stringify({ relayUrl: "ws://192.168.1.105:9000/relay" });
+        }
+        throw new Error("unexpected read");
+      },
+    },
+  });
+
+  assert.equal(config.relayUrl, "ws://192.168.1.105:9000/relay");
   assert.equal(config.pushServiceUrl, "");
 });
 
@@ -219,6 +247,68 @@ test("readBridgeConfig disables managed push defaults when a self-hosted relay o
 
   assert.equal(config.relayUrl, "wss://self-host.example/relay");
   assert.equal(config.pushServiceUrl, "");
+});
+
+test("readBridgeConfig disables hosted push defaults when a persisted relay override exists", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-package-"));
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-state-"));
+  const srcDir = path.join(tempRoot, "src");
+  fs.mkdirSync(srcDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(srcDir, "private-defaults.json"),
+    JSON.stringify({
+      relayUrl: "wss://relay.example/relay",
+      pushServiceUrl: "https://relay.example",
+    }),
+    "utf8"
+  );
+  fs.writeFileSync(
+    path.join(stateDir, "daemon-config.json"),
+    JSON.stringify({ relayUrl: "ws://192.168.1.105:9000/relay" }),
+    "utf8"
+  );
+
+  const config = readBridgeConfig({
+    env: {
+      REMODEX_DEVICE_STATE_DIR: stateDir,
+    },
+    runtimeRoot: tempRoot,
+    fsImpl: fs,
+  });
+
+  assert.equal(config.relayUrl, "ws://192.168.1.105:9000/relay");
+  assert.equal(config.pushServiceUrl, "");
+});
+
+test("readBridgeConfig keeps hosted push defaults when the persisted relay matches the packaged default", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-package-"));
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-state-"));
+  const srcDir = path.join(tempRoot, "src");
+  fs.mkdirSync(srcDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(srcDir, "private-defaults.json"),
+    JSON.stringify({
+      relayUrl: "wss://relay.example/relay",
+      pushServiceUrl: "https://relay.example",
+    }),
+    "utf8"
+  );
+  fs.writeFileSync(
+    path.join(stateDir, "daemon-config.json"),
+    JSON.stringify({ relayUrl: "wss://relay.example/relay" }),
+    "utf8"
+  );
+
+  const config = readBridgeConfig({
+    env: {
+      REMODEX_DEVICE_STATE_DIR: stateDir,
+    },
+    runtimeRoot: tempRoot,
+    fsImpl: fs,
+  });
+
+  assert.equal(config.relayUrl, "wss://relay.example/relay");
+  assert.equal(config.pushServiceUrl, "https://relay.example");
 });
 
 test("thread/start falls back once to the new-thread route when thread id is still unknown", async () => {
