@@ -105,6 +105,21 @@ configuration.connectionProxyDictionary = [:]
 
 ## 实际判断
 
+如果用户问：
+
+- “我手机开着 Shadowrocket，Mac 也开着，会不会互相影响？”
+
+答案是：
+
+- 会有影响，但影响程度取决于 relay 地址类型。
+- 如果 relay 是局域网 / Tailscale / `.local` / `.ts.net`，iPhone 端现在有 App 内 direct transport 兜底，影响比以前小。
+- 但这不等于代理完全无影响，因为 Mac 侧本地 relay、DNS、局域网访问和某些 HTTP 请求仍可能被代理规则带偏。
+- 所以最稳的做法仍然是：两端都给这些私网 / overlay 地址加 `DIRECT`。
+
+现成模块：
+
+- `references/remodex_shadowrocket_direct.sgmodule`
+
 如果用户说：
 
 - “公司里开着 Shadowrocket，`wss://` 一直连不上”

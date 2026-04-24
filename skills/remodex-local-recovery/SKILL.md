@@ -53,6 +53,11 @@ description: Use when the user wants to clear stale Remodex relay state, undo a 
      - `100.64.0.0/10`（Tailscale 常见地址）
      - `*.local`
      - `*.ts.net`
+   - 如果用户不想手动配置规则，直接导入：
+     - `references/remodex_shadowrocket_direct.sgmodule`
+   - 如果 iPhone 和 Mac 都开着 Shadowrocket，建议两端都导入同一份模块。
+     - iPhone 侧：避免 Remodex 连接 relay / resolve 时被代理接管
+     - Mac 侧：避免本地 relay、Tailscale、`.local` 访问和回环链路被错误分流
 4. 如果用户说“TLS 连不上”：
    - 对本地恢复，直接改回 `ws://`，不要继续排 `wss://`
    - `wss://` 只留给真正有反向代理和有效证书的自建公网 relay
