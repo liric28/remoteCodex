@@ -258,9 +258,7 @@ extension CodexService {
         // Full reconciliation — always refresh all threads even if busy-roots already hit some.
         refreshAllThreadTimelineStates()
 
-        if activeThreadId == nil {
-            activeThreadId = firstLiveThreadID()
-        }
+        normalizeActiveThreadSelection()
 
         if pendingNotificationOpenThreadID != nil {
             // A successful thread/list refresh gives us fresh server truth, so retry

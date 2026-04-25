@@ -1356,6 +1356,18 @@ struct ContentView: View {
 
     // Keeps selected thread coherent with server list updates.
     private func syncSelectedThread(with threads: [CodexThread]) {
+        if let activeThreadId = codex.activeThreadId,
+           let activeThread = threads.first(where: { $0.id == activeThreadId }) {
+            if selectedThread?.id != activeThread.id {
+                selectedThread = activeThread
+            }
+            return
+        }
+
+        if codex.activeThreadId != nil {
+            codex.activeThreadId = nil
+        }
+
         if let selected = selectedThread,
            !threads.contains(where: { $0.id == selected.id }) {
             if codex.activeThreadId == selected.id {

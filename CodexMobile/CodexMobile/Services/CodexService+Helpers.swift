@@ -34,6 +34,17 @@ extension CodexService {
         firstLiveThreadIDCache
     }
 
+    // Keeps the selected service-level thread anchored to current server truth after reconnects,
+    // Mac switches, and thread-list refreshes.
+    func normalizeActiveThreadSelection() {
+        if let activeThreadId,
+           thread(for: activeThreadId) != nil {
+            return
+        }
+
+        activeThreadId = firstLiveThreadID()
+    }
+
     func resolveThreadID(_ preferredThreadID: String?) async throws -> String {
         if let preferredThreadID, !preferredThreadID.isEmpty {
             return preferredThreadID

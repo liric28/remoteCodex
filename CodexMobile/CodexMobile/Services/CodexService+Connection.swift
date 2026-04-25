@@ -492,8 +492,10 @@ extension CodexService {
         }
     }
 
-    // Clears volatile runtime state on server switch.
+    // Clears volatile runtime state on server/Mac switch so the next sync starts from the
+    // new bridge's authoritative thread list instead of merging in stale local-only rows.
     func resetThreadRuntimeStateForServerSwitch() {
+        threads = []
         activeThreadId = nil
         activeTurnId = nil
         activeTurnIdByThread.removeAll()

@@ -9,6 +9,19 @@ import Foundation
 import Security
 
 extension CodexService {
+    // When the trusted target changes from one Mac to another under the same relay,
+    // reset visible thread state before the new bridge snapshot arrives.
+    private func resetThreadRuntimeStateForMacSwitchIfNeeded(nextMacDeviceId: String?) {
+        guard let trimmedNextMacDeviceId = nextMacDeviceId?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmedNextMacDeviceId.isEmpty,
+              let currentMacDeviceId = normalizedRelayMacDeviceId,
+              currentMacDeviceId != trimmedNextMacDeviceId else {
+            return
+        }
+
+        resetThreadRuntimeStateForServerSwitch()
+    }
+
     // Completes the secure handshake before any JSON-RPC traffic is sent over the relay.
     func performSecureHandshake() async throws {
         guard let sessionId = normalizedRelaySessionId,
@@ -258,6 +271,7 @@ extension CodexService {
 
     // Saves the QR-derived bridge metadata used for secure reconnects.
     func rememberRelayPairing(_ payload: CodexPairingQRPayload) {
+        resetThreadRuntimeStateForMacSwitchIfNeeded(nextMacDeviceId: payload.macDeviceId)
         SecureStore.writeString(payload.sessionId, for: CodexSecureKeys.relaySessionId)
         SecureStore.writeString(payload.relay, for: CodexSecureKeys.relayUrl)
         SecureStore.writeString(payload.macDeviceId, for: CodexSecureKeys.relayMacDeviceId)
@@ -716,6 +730,7 @@ private extension CodexService {
     }
 
     private func rememberResolvedTrustedSession(_ resolved: CodexTrustedSessionResolveResponse, relayURL: String) {
+        resetThreadRuntimeStateForMacSwitchIfNeeded(nextMacDeviceId: resolved.macDeviceId)
         SecureStore.writeString(resolved.sessionId, for: CodexSecureKeys.relaySessionId)
         SecureStore.writeString(relayURL, for: CodexSecureKeys.relayUrl)
         SecureStore.writeString(resolved.macDeviceId, for: CodexSecureKeys.relayMacDeviceId)

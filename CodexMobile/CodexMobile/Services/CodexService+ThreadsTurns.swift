@@ -65,10 +65,7 @@ extension CodexService {
         }
 
         reconcileLocalThreadsWithServer(activeThreads, serverArchivedThreads: archivedThreads)
-
-        if activeThreadId == nil {
-            activeThreadId = firstLiveThreadID()
-        }
+        normalizeActiveThreadSelection()
     }
 
     // Preserves the older startThread symbol used by most call sites and incremental builds.
