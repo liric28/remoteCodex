@@ -495,23 +495,33 @@ struct TurnTimelineView<EmptyState: View, Composer: View>: View {
     var body: some View {
         if messages.isEmpty {
             // Keep new/empty chats static to avoid scroll indicators and inert scrolling.
-            emptyTimelineState
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(.systemBackground))
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    onTapOutsideComposer()
-                }
-                .simultaneousGesture(emptyStateKeyboardDismissGesture)
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    footer()
-                }
-                .onAppear {
-                    beginScrollSessionIfNeeded()
-                }
-                .onChange(of: threadID) { _, _ in
-                    beginScrollSessionIfNeeded(force: true)
-                }
+            GeometryReader { proxy in
+                emptyTimelineState
+                    .frame(
+                        width: max(proxy.size.width - (timelineHorizontalPadding * 2), 0),
+                        height: proxy.size.height,
+                        alignment: .center
+                    )
+                    .padding(.horizontal, timelineHorizontalPadding)
+                    .padding(.top, 12)
+                    .padding(.bottom, 12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(.systemBackground))
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        onTapOutsideComposer()
+                    }
+                    .simultaneousGesture(emptyStateKeyboardDismissGesture)
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        footer()
+                    }
+            }
+            .onAppear {
+                beginScrollSessionIfNeeded()
+            }
+            .onChange(of: threadID) { _, _ in
+                beginScrollSessionIfNeeded(force: true)
+            }
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
