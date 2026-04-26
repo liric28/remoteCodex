@@ -104,6 +104,7 @@ extension CodexService {
             }
 
             startSyncLoop()
+            startWebSocketHeartbeat()
             // Push registration is best-effort and talks to the bridge, so it must not
             // hold the main connect path hostage when the managed backend is slow.
             Task { @MainActor [weak self] in
@@ -135,6 +136,7 @@ extension CodexService {
 
     // Closes the socket and fails any in-flight requests.
     func disconnect(preserveReconnectIntent: Bool = false) async {
+        stopWebSocketHeartbeat()
         cancelCurrentSocketConnection()
 
         isConnected = false
@@ -406,6 +408,7 @@ extension CodexService {
         }
 
         cancelCurrentSocketConnection()
+        stopWebSocketHeartbeat()
 
         let disposition = receiveErrorDisposition(for: error, relayCloseCode: relayCloseCode)
         isConnected = false
@@ -545,6 +548,7 @@ extension CodexService {
 
     // Removes the current socket reference before reconnect/teardown logic mutates shared state.
     private func cancelCurrentSocketConnection() {
+        stopWebSocketHeartbeat()
         if let connection = webSocketConnection {
             connection.stateUpdateHandler = nil
             webSocketConnection = nil

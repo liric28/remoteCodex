@@ -81,6 +81,7 @@ When the user says the public relay is correct (for example `wss://api.phodex.ap
    - benign background disconnect filtering
    - trusted-session resolve vs saved-session fallback
    - whether stale selected thread or stale saved relay state is confusing the UI after reconnect
+   - whether the active public-relay transport is sending any heartbeat/ping at all
 7. Only after steps 1-6 should you change code.
    - Prefer improving classification, recovery messaging, and reconnect-state consistency
    - Do not “fix” a public relay instability problem by forcing LAN relay defaults
@@ -93,6 +94,7 @@ When the user says the public relay is correct (for example `wss://api.phodex.ap
   - long-lived WebSocket handling by the current network or proxy node
   - iOS lifecycle interruptions
   - relay-side flakiness
+- A missing client heartbeat on the public WebSocket path is a first-class suspect when the socket idles out cleanly or semi-silently.
 - Once the Mac is confirmed on a public relay, stop framing the issue as “private relay misconfiguration”.
 
 ## User communication
