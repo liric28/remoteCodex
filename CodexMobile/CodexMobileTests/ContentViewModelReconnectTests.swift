@@ -85,6 +85,64 @@ final class ContentViewModelReconnectTests: XCTestCase {
         )
     }
 
+    func testPreferredReconnectURLStopsWhenLocalOnlyRelayIsUnreachableAcrossNetworks() async {
+        let service = makeService()
+        let viewModel = ContentViewModel()
+        let macDeviceID = "mac-\(UUID().uuidString)"
+        let relayURL = "ws://192.168.1.105:9000/relay"
+
+        service.trustedMacRegistry.records[macDeviceID] = CodexTrustedMacRecord(
+            macDeviceId: macDeviceID,
+            macIdentityPublicKey: Data(repeating: 22, count: 32).base64EncodedString(),
+            lastPairedAt: Date(),
+            relayURL: relayURL
+        )
+        service.lastTrustedMacDeviceId = macDeviceID
+        service.relaySessionId = "saved-session"
+        service.relayUrl = relayURL
+        service.relayMacDeviceId = macDeviceID
+        service.trustedSessionResolverOverride = {
+            throw CodexTrustedSessionResolveError.network(
+                "Could not reach the trusted Mac relay. Check your connection and try again."
+            )
+        }
+
+        let reconnectURL = await viewModel.preferredReconnectURL(codex: service)
+
+        XCTAssertNil(reconnectURL)
+        XCTAssertEqual(
+            service.lastErrorMessage,
+            "This Mac is paired through a local-only relay at \(relayURL). Reconnect requires the iPhone to be on the same LAN or shared VPN/Tailscale network."
+        )
+    }
+
+    func testPreferredReconnectURLFallsBackWhenPublicRelayResolveFails() async {
+        let service = makeService()
+        let viewModel = ContentViewModel()
+        let macDeviceID = "mac-\(UUID().uuidString)"
+        let relayURL = "wss://relay.example.com/relay"
+
+        service.trustedMacRegistry.records[macDeviceID] = CodexTrustedMacRecord(
+            macDeviceId: macDeviceID,
+            macIdentityPublicKey: Data(repeating: 23, count: 32).base64EncodedString(),
+            lastPairedAt: Date(),
+            relayURL: relayURL
+        )
+        service.lastTrustedMacDeviceId = macDeviceID
+        service.relaySessionId = "saved-session"
+        service.relayUrl = relayURL
+        service.relayMacDeviceId = macDeviceID
+        service.trustedSessionResolverOverride = {
+            throw CodexTrustedSessionResolveError.network(
+                "Could not reach the trusted Mac relay. Check your connection and try again."
+            )
+        }
+
+        let reconnectURL = await viewModel.preferredReconnectURL(codex: service)
+
+        XCTAssertEqual(reconnectURL, "\(relayURL)/saved-session")
+    }
+
     func testForegroundReconnectKeepsRetryIntentArmedAfterRetryableFailures() async {
         let service = makeService()
         let viewModel = ContentViewModel()

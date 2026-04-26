@@ -462,6 +462,11 @@ extension ContentViewModel {
         case .noTrustedMac:
             return .fallbackToSaved
         case .invalidResponse(let message), .network(let message):
+            if shouldStopOnUnreachableLocalOnlyRelay(codex: codex) {
+                codex.connectionRecoveryState = .idle
+                codex.lastErrorMessage = codex.localOnlyRelayReconnectMessage(for: codex.preferredWakeRelayURL)
+                return .stop
+            }
             if !codex.hasSavedRelaySession {
                 codex.lastErrorMessage = message
             }
@@ -476,6 +481,20 @@ extension ContentViewModel {
             return nil
         }
         return "\(relayURL)/\(sessionId)"
+    }
+
+    // Avoids retrying both trusted-session resolve and raw websocket against the same local-only relay
+    // when the phone is off that LAN/VPN; that path cannot recover without a reachable network.
+    private func shouldStopOnUnreachableLocalOnlyRelay(codex: CodexService) -> Bool {
+        let trustedRelayURL = codex.preferredTrustedReconnectRelayURL
+        let savedRelayURL = codex.normalizedRelayURL
+
+        let hasLocalOnlyCandidate = codex.localOnlyRelayURL(trustedRelayURL) != nil
+            || codex.localOnlyRelayURL(savedRelayURL) != nil
+        let hasNonLocalCandidate = codex.nonLocalRelayURL(trustedRelayURL) != nil
+            || codex.nonLocalRelayURL(savedRelayURL) != nil
+
+        return hasLocalOnlyCandidate && !hasNonLocalCandidate
     }
 
     // Centralizes reconnect sleeps so manual retry can interrupt stale foreground backoff quickly.

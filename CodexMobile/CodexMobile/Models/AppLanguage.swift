@@ -164,6 +164,7 @@ private let exactLocalizedAppMessages: [String: String] = [
     "The secure control payload was not valid UTF-8.": "安全控制载荷不是有效的 UTF-8。",
     "The trusted Mac relay URL is invalid.": "可信 Mac 中继 URL 无效。",
     "Could not reach the trusted Mac relay. Check your connection and try again.": "无法连接可信 Mac 中继。请检查网络后重试。",
+    "This Mac is paired through a local-only relay. Reconnect requires the iPhone to be on the same LAN or shared VPN/Tailscale network.": "这台 Mac 是通过仅本地可达的中继配对的。重新连接要求 iPhone 与这台 Mac 处于同一局域网，或连接到同一个 VPN/Tailscale 网络。",
     "The trusted Mac relay returned an invalid response.": "可信 Mac 中继返回了无效响应。",
     "The trusted Mac relay returned malformed session data.": "可信 Mac 中继返回了格式错误的会话数据。",
     "This iPhone is no longer trusted by the Mac. Scan a new QR code to reconnect.": "这台 iPhone 已不再被 Mac 信任。请扫描新的二维码重新连接。",
@@ -182,9 +183,19 @@ private func localizedPrefixedAppMessage(_ message: String) -> String? {
         return "中继服务器拒绝连接：\(suffix)"
     }
 
+    if let suffix = message.removingPrefix("Cannot reach local-only relay server at "),
+       let relayURL = suffix.removingSuffix(". Make sure the iPhone is on the same LAN or shared VPN/Tailscale network as this Mac.") {
+        return "无法连接仅本地可达的中继服务器：\(relayURL)。请确认 iPhone 与这台 Mac 处于同一局域网，或连接到同一个 VPN/Tailscale 网络。"
+    }
+
     if let suffix = message.removingPrefix("Cannot reach relay server at "),
-       let relayURL = suffix.removingSuffix(". Check that the iPhone can access the Mac on the local network.") {
-        return "无法连接中继服务器：\(relayURL)。请确认 iPhone 可以通过本地网络访问 Mac。"
+       let relayURL = suffix.removingSuffix(". Check your network connection and relay reachability.") {
+        return "无法连接中继服务器：\(relayURL)。请检查网络连接和中继可达性。"
+    }
+
+    if let suffix = message.removingPrefix("This Mac is paired through a local-only relay at "),
+       let relayURL = suffix.removingSuffix(". Reconnect requires the iPhone to be on the same LAN or shared VPN/Tailscale network.") {
+        return "这台 Mac 是通过仅本地可达的中继配对的：\(relayURL)。重新连接要求 iPhone 与这台 Mac 处于同一局域网，或连接到同一个 VPN/Tailscale 网络。"
     }
 
     if message.hasPrefix("Connection timed out after 12s while opening the direct relay socket.") {

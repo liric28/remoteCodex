@@ -806,11 +806,15 @@ final class CodexService {
     }
 
     var hasTrustedMacReconnectCandidate: Bool {
-        preferredTrustedMacRecord?.relayURL?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        preferredTrustedReconnectRelayURL != nil
     }
 
     var hasReconnectCandidate: Bool {
         hasSavedRelaySession || hasTrustedMacReconnectCandidate
+    }
+
+    var preferredTrustedReconnectRelayURL: String? {
+        preferredRelayURL(for: preferredTrustedMacRecord)
     }
 
     // Chooses the best relay base URL for display-wake recovery, even when only the trusted Mac record remains.
@@ -821,8 +825,8 @@ final class CodexService {
         }
 
         let candidates = [
+            preferredTrustedReconnectRelayURL,
             normalizedRelayURL,
-            preferredTrustedMacRecord?.relayURL?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
         ]
 
         for relayURL in candidates {
@@ -842,6 +846,72 @@ final class CodexService {
         }
 
         return hasReconnectCandidate
+    }
+
+    func preferredRelayURL(for trustedMac: CodexTrustedMacRecord?) -> String? {
+        guard let trustedMac else {
+            return nil
+        }
+
+        let activeRelayURL: String?
+        if normalizedRelayMacDeviceId == trustedMac.macDeviceId {
+            activeRelayURL = normalizedRelayURL
+        } else {
+            activeRelayURL = nil
+        }
+
+        let candidates = [
+            nonLocalRelayURL(activeRelayURL),
+            trustedMac.persistentRelayURL?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+            nonLocalRelayURL(trustedMac.relayURL),
+            activeRelayURL?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+            trustedMac.localRelayURL?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+            localOnlyRelayURL(trustedMac.relayURL),
+        ]
+
+        for relayURL in candidates {
+            if let relayURL {
+                return relayURL
+            }
+        }
+
+        return nil
+    }
+
+    func persistentRelayURL(for trustedMac: CodexTrustedMacRecord?) -> String? {
+        guard let trustedMac else {
+            return nil
+        }
+
+        return trustedMac.persistentRelayURL?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            ?? nonLocalRelayURL(trustedMac.relayURL)
+    }
+
+    func localFallbackRelayURL(for trustedMac: CodexTrustedMacRecord?) -> String? {
+        guard let trustedMac else {
+            return nil
+        }
+
+        return trustedMac.localRelayURL?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            ?? localOnlyRelayURL(trustedMac.relayURL)
+    }
+
+    func nonLocalRelayURL(_ relayURL: String?) -> String? {
+        guard let relayURL = relayURL?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+              !relayRequiresSharedLocalNetwork(relayURL) else {
+            return nil
+        }
+
+        return relayURL
+    }
+
+    func localOnlyRelayURL(_ relayURL: String?) -> String? {
+        guard let relayURL = relayURL?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+              relayRequiresSharedLocalNetwork(relayURL) else {
+            return nil
+        }
+
+        return relayURL
     }
 
     // Separates transport readiness from post-connect hydration so the UI can explain delays honestly.

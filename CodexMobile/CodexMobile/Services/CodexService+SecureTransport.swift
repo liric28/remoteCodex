@@ -288,6 +288,7 @@ extension CodexService {
         trustedReconnectFailureCount = 0
         secureConnectionState = trustedMacRegistry.records[payload.macDeviceId] == nil ? .handshaking : .trustedMac
         secureMacFingerprint = codexSecureFingerprint(for: payload.macIdentityPublicKey)
+        rememberTrustedRelayCandidate(for: payload.macDeviceId, relayURL: payload.relay)
     }
 
     // Resets volatile secure state while preserving the trusted-device registry.
@@ -616,16 +617,20 @@ private extension CodexService {
 
     func trustMac(deviceId: String, publicKey: String, relayURL: String?, displayName: String?) {
         let existing = trustedMacRegistry.records[deviceId]
-        trustedMacRegistry.records[deviceId] = CodexTrustedMacRecord(
+        var nextRecord = CodexTrustedMacRecord(
             macDeviceId: deviceId,
             macIdentityPublicKey: publicKey,
             lastPairedAt: Date(),
             relayURL: relayURL ?? existing?.relayURL,
+            persistentRelayURL: existing?.persistentRelayURL,
+            localRelayURL: existing?.localRelayURL,
             displayName: displayName ?? existing?.displayName,
             lastResolvedSessionId: existing?.lastResolvedSessionId,
             lastResolvedAt: existing?.lastResolvedAt,
             lastUsedAt: Date()
         )
+        updateRelaySlots(on: &nextRecord, with: relayURL)
+        trustedMacRegistry.records[deviceId] = nextRecord
         SecureStore.writeCodable(trustedMacRegistry, for: CodexSecureKeys.trustedMacRegistry)
         SecureStore.writeString(deviceId, for: CodexSecureKeys.lastTrustedMacDeviceId)
         lastTrustedMacDeviceId = deviceId
@@ -636,7 +641,7 @@ private extension CodexService {
         guard let trustedMac = preferredTrustedMacRecord else {
             throw CodexTrustedSessionResolveError.noTrustedMac
         }
-        guard let relayURL = trustedMac.relayURL?.trimmingCharacters(in: .whitespacesAndNewlines),
+        guard let relayURL = preferredRelayURL(for: trustedMac),
               !relayURL.isEmpty else {
             throw CodexTrustedSessionResolveError.noTrustedMac
         }
@@ -750,6 +755,7 @@ private extension CodexService {
 
         if var trustedMac = trustedMacRegistry.records[resolved.macDeviceId] {
             trustedMac.relayURL = relayURL
+            updateRelaySlots(on: &trustedMac, with: relayURL)
             trustedMac.displayName = resolved.displayName ?? trustedMac.displayName
             trustedMac.lastResolvedSessionId = resolved.sessionId
             trustedMac.lastResolvedAt = Date()
@@ -785,8 +791,7 @@ private extension CodexService {
         if let normalizedRelayURL {
             return normalizedRelayURL
         }
-        if let trustedRelayURL = preferredTrustedMacRecord?.relayURL?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !trustedRelayURL.isEmpty {
+        if let trustedRelayURL = preferredTrustedReconnectRelayURL {
             return trustedRelayURL
         }
         let defaultRelayURL = AppEnvironment.relayBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -829,6 +834,31 @@ private extension CodexService {
         }
 
         return URLSession(configuration: configuration)
+    }
+
+    func rememberTrustedRelayCandidate(for macDeviceId: String, relayURL: String?) {
+        guard var trustedMac = trustedMacRegistry.records[macDeviceId] else {
+            return
+        }
+
+        updateRelaySlots(on: &trustedMac, with: relayURL)
+        trustedMac.lastUsedAt = Date()
+        trustedMacRegistry.records[macDeviceId] = trustedMac
+        SecureStore.writeCodable(trustedMacRegistry, for: CodexSecureKeys.trustedMacRegistry)
+    }
+
+    func updateRelaySlots(on trustedMac: inout CodexTrustedMacRecord, with relayURL: String?) {
+        guard let relayURL = relayURL?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !relayURL.isEmpty else {
+            return
+        }
+
+        trustedMac.relayURL = relayURL
+        if relayRequiresSharedLocalNetwork(relayURL) {
+            trustedMac.localRelayURL = relayURL
+        } else {
+            trustedMac.persistentRelayURL = relayURL
+        }
     }
 
     /// Waits for a serverHello whose echoed clientNonce matches the one we sent.

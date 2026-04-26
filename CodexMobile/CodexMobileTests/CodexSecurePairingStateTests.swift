@@ -69,6 +69,36 @@ final class CodexSecurePairingStateTests: XCTestCase {
         XCTAssertEqual(service.secureMacFingerprint, codexSecureFingerprint(for: freshQRPublicKey))
     }
 
+    func testRememberRelayPairingKeepsPersistentRelayWhenTrustedMacScansLocalRelay() {
+        let service = CodexService()
+        let macDeviceID = "mac-\(UUID().uuidString)"
+        let publicKey = Data(repeating: 5, count: 32).base64EncodedString()
+
+        service.trustedMacRegistry.records[macDeviceID] = CodexTrustedMacRecord(
+            macDeviceId: macDeviceID,
+            macIdentityPublicKey: publicKey,
+            lastPairedAt: Date(),
+            relayURL: "wss://relay.example.com/relay",
+            persistentRelayURL: "wss://relay.example.com/relay"
+        )
+
+        service.rememberRelayPairing(
+            CodexPairingQRPayload(
+                v: codexPairingQRVersion,
+                relay: "ws://192.168.1.105:9000/relay",
+                sessionId: "session-\(UUID().uuidString)",
+                macDeviceId: macDeviceID,
+                macIdentityPublicKey: publicKey,
+                expiresAt: Int64(Date().addingTimeInterval(60).timeIntervalSince1970 * 1000)
+            )
+        )
+
+        let trustedRecord = service.trustedMacRegistry.records[macDeviceID]
+        XCTAssertEqual(trustedRecord?.persistentRelayURL, "wss://relay.example.com/relay")
+        XCTAssertEqual(trustedRecord?.localRelayURL, "ws://192.168.1.105:9000/relay")
+        XCTAssertEqual(service.preferredTrustedReconnectRelayURL, "wss://relay.example.com/relay")
+    }
+
     func testResetSecureTransportStatePreservesRePairRequiredState() {
         let service = CodexService()
         service.relaySessionId = "session-\(UUID().uuidString)"

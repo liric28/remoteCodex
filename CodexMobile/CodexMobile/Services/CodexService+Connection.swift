@@ -766,6 +766,30 @@ extension CodexService {
         return url
     }
 
+    func relayRequiresSharedLocalNetwork(_ relayURL: String?) -> Bool {
+        guard let relayURL = relayURL?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let url = URL(string: relayURL) else {
+            return false
+        }
+
+        guard let host = url.host?.lowercased() else {
+            return false
+        }
+
+        return host.hasSuffix(".local")
+            || isPrivateIPv4Host(host)
+            || isLocalIPv6Host(host)
+    }
+
+    func localOnlyRelayReconnectMessage(for relayURL: String?) -> String {
+        let trimmedRelayURL = relayURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmedRelayURL.isEmpty {
+            return "This Mac is paired through a local-only relay. Reconnect requires the iPhone to be on the same LAN or shared VPN/Tailscale network."
+        }
+
+        return "This Mac is paired through a local-only relay at \(trimmedRelayURL). Reconnect requires the iPhone to be on the same LAN or shared VPN/Tailscale network."
+    }
+
     func userFacingConnectError(error: Error, attemptedURL: String, host: String?) -> String {
         if let nwError = error as? NWError {
             switch nwError {
@@ -774,7 +798,10 @@ extension CodexService {
             case .posix(let code) where code == .EMSGSIZE:
                 return oversizedRelayPayloadMessage
             case .posix(let code) where code == .ENETDOWN || code == .ENETUNREACH || code == .EHOSTUNREACH:
-                return "Cannot reach relay server at \(attemptedURL). Check that the iPhone can access the Mac on the local network."
+                if relayRequiresSharedLocalNetwork(attemptedURL) {
+                    return "Cannot reach local-only relay server at \(attemptedURL). Make sure the iPhone is on the same LAN or shared VPN/Tailscale network as this Mac."
+                }
+                return "Cannot reach relay server at \(attemptedURL). Check your network connection and relay reachability."
             case .posix(let code) where code == .ETIMEDOUT:
                 return "Connection timed out. Check server/network."
             case .dns(let code):
