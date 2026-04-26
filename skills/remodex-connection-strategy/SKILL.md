@@ -59,3 +59,8 @@ Use this skill for Remodex connection work before changing reconnect code or exp
   - same LAN, VPN, Tailscale, or public relay is required
 - Distinguish “product behavior bug” from “network topology limitation”.
 - Prefer end-to-end fixes over point patches.
+
+## Related skills
+
+- If the user wants to force macOS global `remodex up/restart` onto one LAN relay, use `skills/remodex-global-local-relay/SKILL.md`.
+- If the user wants to clear stale state and return one Mac to fresh local pairing, use `skills/remodex-local-recovery/SKILL.md`.

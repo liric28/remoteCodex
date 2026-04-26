@@ -9,6 +9,15 @@ description: Use when the user wants Remodex on macOS to always default to a loc
 
 这个 skill 处理的是“以后裸 `remodex up` / `remodex restart` 也默认走局域网”的场景，不是一次性的本地恢复配对。
 
+如果用户的问题是：
+
+- iPhone 在多台 Mac 之间反复切换
+- trusted reconnect / saved session / websocket 重连策略混乱
+- 局域网 relay 覆盖了长期可达 relay
+- 需要从全链路角度修连接架构
+
+优先使用 `skills/remodex-connection-strategy/SKILL.md`，不要直接用这个 skill 代替连接架构修复。
+
 优先处理这些场景：
 
 - “切全局本地 relay”

@@ -7,6 +7,14 @@ description: Use when the user wants to clear stale Remodex relay state, undo a 
 
 用于把 Mac 端从旧的 Tailscale / 自定义 relay 状态恢复到本地局域网配对。
 
+如果用户的问题是：
+
+- 同一台 iPhone 在 A/B 多台 Mac 之间切换时连接状态错乱
+- 需要区分长期 relay 和局域网临时 relay
+- 需要重构 trusted reconnect / saved-session 回退策略
+
+优先使用 `skills/remodex-connection-strategy/SKILL.md`，这个 skill 只负责“清状态并回到本地 LAN 配对”，不是多 Mac 连接架构修复。
+
 优先处理这些场景：
 
 - “在家里一直连不上，想改回本地 relay / 局域网”
