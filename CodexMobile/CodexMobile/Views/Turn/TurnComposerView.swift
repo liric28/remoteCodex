@@ -207,7 +207,7 @@ struct TurnComposerView: View {
                     }
                     .offset(y: -8)
             }
-            .zIndex(2)
+            .zIndex(2).beam(BeamSize.medium, palette: .colorful, cornerRadius: 28)
 
             // Kept as a separate component so the lower meta bar can evolve without reopening this file.
             TurnComposerSecondaryBar(
