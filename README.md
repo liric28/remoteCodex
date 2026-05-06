@@ -89,6 +89,8 @@ This repo contains the local bridge, the iOS app target, and their tests:
 │   └── BuildSupport/             # Info.plist, xcconfig defaults, and local override templates
 ```
 
+If you maintain a customized fork and need to catch up with large upstream updates, see the fork-maintenance playbook in [`Docs/upstream-integration-playbook.md`](Docs/upstream-integration-playbook.md).
+
 ## Prerequisites
 
 - **Node.js** v18+
