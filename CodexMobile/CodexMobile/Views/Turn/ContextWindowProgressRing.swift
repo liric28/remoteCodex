@@ -13,16 +13,16 @@ struct ContextWindowProgressRing: View {
     let rateLimitsErrorMessage: String?
     let shouldAutoRefreshStatus: Bool
     let onRefreshStatus: (() async -> Void)?
+    let onRefreshAccount: (() async -> Void)?
     @State private var isShowingPopover = false
     @State private var isRefreshing = false
+    @State private var isRefreshingAccount = false
 
     private let ringSize: CGFloat = 18
     private let lineWidth: CGFloat = 2.25
     private let tapTargetSize: CGFloat = 36
 
     var body: some View {
-        let displayUsage = usage ?? .zero
-
         Button {
             HapticFeedback.shared.triggerImpactFeedback(style: .light)
             isShowingPopover = true
@@ -31,23 +31,29 @@ struct ContextWindowProgressRing: View {
                 Circle()
                     .stroke(Color(.systemGray5), lineWidth: lineWidth)
 
-                Circle()
-                    .trim(from: 0, to: displayUsage.fractionUsed)
-                    .stroke(ringColor(for: displayUsage), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
+                if let usage {
+                    Circle()
+                        .trim(from: 0, to: usage.fractionUsed)
+                        .stroke(ringColor(for: usage), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
 
-                Text("\(displayUsage.percentUsed)")
-                    .font(AppFont.system(size: 6, weight: .semibold))
-                    .minimumScaleFactor(0.75)
-                    .foregroundStyle(ringColor(for: displayUsage))
+                    Text("\(usage.percentUsed)")
+                        .font(AppFont.system(size: 6, weight: .semibold))
+                        .minimumScaleFactor(0.75)
+                        .foregroundStyle(ringColor(for: usage))
+                } else {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(Color(.systemGray2))
+                }
             }
             .frame(width: ringSize, height: ringSize)
             .frame(width: tapTargetSize, height: tapTargetSize)
-            .adaptiveGlass(.regular, in: Circle())
+            .adaptiveGlass(.toolbarControl, in: Circle())
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Context window")
+        .accessibilityLabel(L("Context window", "上下文窗口"))
         .accessibilityValue(usageAccessibilityValue)
         .popover(isPresented: $isShowingPopover) {
             popoverContent
@@ -61,14 +67,22 @@ struct ContextWindowProgressRing: View {
 
     private var popoverContent: some View {
         UsageStatusSummaryContent(
-            contextWindowUsage: usage ?? .zero,
+            contextWindowUsage: usage,
             rateLimitBuckets: rateLimitBuckets,
             isLoadingRateLimits: isLoadingRateLimits,
             rateLimitsErrorMessage: rateLimitsErrorMessage,
             contextPlacement: .bottom,
+            leadingControl: onRefreshAccount.map { _ in
+                UsageStatusRefreshControl(
+                    title: L("Refresh account", "刷新账号"),
+                    systemImage: "arrow.clockwise.circle",
+                    isRefreshing: isRefreshingAccount,
+                    action: { refreshAccount() }
+                )
+            },
             refreshControl: onRefreshStatus.map { _ in
                 UsageStatusRefreshControl(
-                    title: "Refresh",
+                    title: L("Refresh", "刷新"),
                     isRefreshing: isRefreshing,
                     action: { refreshStatus() }
                 )
@@ -79,7 +93,10 @@ struct ContextWindowProgressRing: View {
     }
 
     private var usageAccessibilityValue: String {
-        "\(usage?.percentUsed ?? 0) percent used"
+        if let usage {
+            return L("\(usage.percentUsed) percent used", "已使用 \(usage.percentUsed)%")
+        }
+        return L("Usage unavailable", "用量不可用")
     }
 
     private func ringColor(for usage: ContextWindowUsage) -> Color {
@@ -102,6 +119,21 @@ struct ContextWindowProgressRing: View {
             await onRefreshStatus()
             await MainActor.run {
                 isRefreshing = false
+            }
+        }
+    }
+
+    private func refreshAccount(triggerHaptic: Bool = true) {
+        guard !isRefreshingAccount, let onRefreshAccount else { return }
+        if triggerHaptic {
+            HapticFeedback.shared.triggerImpactFeedback(style: .light)
+        }
+        isRefreshingAccount = true
+
+        Task {
+            await onRefreshAccount()
+            await MainActor.run {
+                isRefreshingAccount = false
             }
         }
     }

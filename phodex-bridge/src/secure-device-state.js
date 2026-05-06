@@ -38,12 +38,7 @@ function loadOrCreateBridgeDeviceState() {
   }
 
   if (keychainRecord.error) {
-    warnOnce(
-      "[remodex] Ignoring unreadable legacy Keychain pairing mirror; generating a fresh canonical device-state.json."
-    );
-    const nextState = createBridgeDeviceState();
-    writeBridgeDeviceState(nextState);
-    return nextState;
+    throw corruptedStateError("legacy Keychain bridge state", keychainRecord.error);
   }
 
   if (keychainRecord.state) {

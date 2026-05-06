@@ -5,6 +5,7 @@
 // Depends on: CodexService, Sidebar* components/helpers
 
 import SwiftUI
+import UIKit
 
 struct SidebarView: View {
     @Environment(CodexService.self) private var codex
@@ -17,15 +18,13 @@ struct SidebarView: View {
     var isVisible: Bool = true
 
     let onClose: () -> Void
-    let onNewChatCreationStateChange: (Bool) -> Void
     let onOpenThread: (CodexThread) -> Void
 
     @State private var searchText = ""
     @State private var isCreatingThread = false
     @State private var groupedThreads: [SidebarThreadGroup] = []
-    @State private var activeSidebarSheet: SidebarPresentedSheet?
+    @State private var isShowingNewChatProjectPicker = false
     @State private var projectGroupPendingArchive: SidebarThreadGroup? = nil
-    @State private var projectGroupPendingDeletion: SidebarThreadGroup? = nil
     @State private var threadPendingDeletion: CodexThread? = nil
     @State private var createThreadErrorMessage: String? = nil
     @State private var cachedDiffTotals: [String: TurnSessionDiffTotals] = [:]
@@ -34,6 +33,10 @@ struct SidebarView: View {
     @State private var lastGroupedThreadsFingerprint: Int = 0
     @State private var lastDiffFingerprint: Int = 0
     @State private var lastBadgeFingerprint: Int = 0
+    @State private var sidebarDebugSequence = 0
+    @State private var isOpeningSettings = false
+    @State private var lastSettingsOpenAt: Date? = nil
+    @State private var keyboardBottomInset: CGFloat = 0
 
     var body: some View {
         let diffTotalsByThreadID = cachedDiffTotals
@@ -58,16 +61,6 @@ struct SidebarView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 10)
 
-            if SidebarThreadsLoadingPresentation.shouldShowInlineStatus(
-                isLoadingThreads: codex.isLoadingThreads,
-                threadCount: codex.threads.count
-            ) {
-                SidebarThreadsInlineLoadingView()
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
-                    .transition(.opacity)
-            }
-
             SidebarThreadListView(
                 isFiltering: !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                 isConnected: codex.isConnected,
@@ -86,19 +79,8 @@ struct SidebarView: View {
                 onArchiveProjectGroup: { group in
                     projectGroupPendingArchive = group
                 },
-                onDeleteProjectGroup: { group in
-                    projectGroupPendingDeletion = group
-                },
                 onRenameThread: { thread, newName in
                     codex.renameThread(thread.id, name: newName)
-                },
-                onPinToggleThread: { thread in
-                    if codex.isThreadPinned(thread.id) {
-                        codex.unpinThread(thread.id)
-                    } else {
-                        codex.pinThread(thread.id)
-                    }
-                    rebuildGroupedThreads()
                 },
                 onArchiveToggleThread: { thread in
                     if thread.syncState == .archivedLocal {
@@ -118,22 +100,21 @@ struct SidebarView: View {
                 await refreshThreads()
             }
 
-            HStack(spacing: 10) {
-                SidebarFloatingSettingsButton(colorScheme: colorScheme, action: openSettings)
-                Spacer(minLength: 0)
-                if let trustedPairPresentation = codex.trustedPairPresentation {
-                    SidebarComputerConnectionStatusView(
-                        name: trustedPairPresentation.name,
-                        systemName: trustedPairPresentation.systemName,
-                        isConnected: codex.isConnected
-                    )
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
+            sidebarFooter
         }
         .frame(maxHeight: .infinity)
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .background(Color(.systemBackground))
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+            animateWithKeyboardNotification(notification) { keyboardFrame in
+                keyboardBottomInset = keyboardOverlapHeight(for: keyboardFrame)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { notification in
+            animateWithKeyboardNotification(notification) { _ in
+                keyboardBottomInset = 0
+            }
+        }
         .task {
             debugSidebarLog("task start visible=\(isVisible) threadCount=\(codex.threads.count)")
             rebuildGroupedThreads()
@@ -154,10 +135,6 @@ struct SidebarView: View {
             debugSidebarLog("search changed queryLength=\(searchText.count)")
             rebuildGroupedThreads()
         }
-        .onChange(of: codex.pinnedThreadIDs) { _, _ in
-            debugSidebarLog("pinned threads changed count=\(codex.pinnedThreadIDs.count)")
-            rebuildGroupedThreads()
-        }
         .onChange(of: diffFingerprint) { _, _ in
             debugSidebarLog("diff fingerprint changed visible=\(isVisible)")
             rebuildCachedDiffTotals()
@@ -168,6 +145,9 @@ struct SidebarView: View {
         }
         .onChange(of: isVisible) { _, visible in
             debugSidebarLog("visibility changed visible=\(visible)")
+            if !visible {
+                isOpeningSettings = false
+            }
         }
         .overlay {
             if SidebarThreadsLoadingPresentation.shouldShowOverlay(
@@ -179,8 +159,19 @@ struct SidebarView: View {
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
             }
         }
-        .sheet(item: $activeSidebarSheet) { sheet in
-            sidebarSheetContent(sheet)
+        .sheet(isPresented: $isShowingNewChatProjectPicker) {
+            SidebarNewChatProjectPickerSheet(
+                choices: newChatProjectChoices,
+                onSelectProject: { projectPath in
+                    handleNewChatTap(preferredProjectPath: projectPath)
+                },
+                onSelectWorktreeProject: { projectPath in
+                    handleNewWorktreeChatTap(preferredProjectPath: projectPath)
+                },
+                onSelectWithoutProject: {
+                    handleNewChatTap(preferredProjectPath: nil)
+                }
+            )
         }
         .confirmationDialog(
             "Archive \"\(projectGroupPendingArchive?.label ?? "project")\"?",
@@ -200,42 +191,24 @@ struct SidebarView: View {
             Text("All active chats in this project will be archived.")
         }
         .alert(
-            "Remove \"\(projectGroupPendingDeletion?.label ?? "project")\" from this phone?",
-            isPresented: Binding(
-                get: { projectGroupPendingDeletion != nil },
-                set: { if !$0 { projectGroupPendingDeletion = nil } }
-            )
-        ) {
-            Button("Remove from Phone", role: .destructive) {
-                deletePendingProjectGroupLocally()
-            }
-            Button("Cancel", role: .cancel) {
-                projectGroupPendingDeletion = nil
-            }
-        } message: {
-            Text("Chats for this project will be deleted only from Remodex on this phone. Nothing is removed from your computer or Codex observer.")
-        }
-        .alert(
-            "Remove \"\(threadPendingDeletion?.displayTitle ?? "conversation")\" from this phone?",
+            "Delete \"\(threadPendingDeletion?.displayTitle ?? "conversation")\"?",
             isPresented: Binding(
                 get: { threadPendingDeletion != nil },
                 set: { if !$0 { threadPendingDeletion = nil } }
             )
         ) {
-            Button("Remove from Phone", role: .destructive) {
+            Button("Delete", role: .destructive) {
                 if let thread = threadPendingDeletion {
                     if selectedThread?.id == thread.id {
                         selectedThread = nil
                     }
-                    codex.deleteThreadLocally(thread.id)
+                    codex.deleteThread(thread.id)
                 }
                 threadPendingDeletion = nil
             }
             Button("Cancel", role: .cancel) {
                 threadPendingDeletion = nil
             }
-        } message: {
-            Text("This only removes the chat from Remodex on this phone. Nothing is removed from your computer or Codex observer.")
         }
         .alert(
             "Action failed",
@@ -275,25 +248,42 @@ struct SidebarView: View {
         }
     }
 
-    // Shows a native sheet so folder names and full paths stay readable on small screens.
-    private func handleNewChatButtonTap() {
-        activeSidebarSheet = .newChatProjectPicker
+    private var sidebarFooter: some View {
+        HStack(spacing: 10) {
+            SidebarFloatingSettingsButton(
+                colorScheme: colorScheme,
+                isDisabled: isOpeningSettings,
+                action: openSettings
+            )
+            Spacer(minLength: 0)
+            if let trustedPairPresentation = codex.trustedPairPresentation {
+                SidebarMacConnectionStatusView(
+                    name: trustedPairPresentation.name,
+                    systemName: trustedPairPresentation.systemName,
+                    isConnected: codex.isConnected
+                )
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .offset(y: -keyboardBottomInset)
     }
 
-    private func presentLocalFolderBrowser() {
-        activeSidebarSheet = .localFolderBrowser
+    // Shows a native sheet so folder names and full paths stay readable on small screens.
+    private func handleNewChatButtonTap() {
+        if newChatProjectChoices.isEmpty {
+            handleNewChatTap(preferredProjectPath: nil)
+            return
+        }
+
+        isShowingNewChatProjectPicker = true
     }
 
     private func handleNewChatTap(preferredProjectPath: String?) {
-        createThreadErrorMessage = nil
-        isCreatingThread = true
-        onNewChatCreationStateChange(true)
-        prepareSidebarForChatNavigation()
         Task { @MainActor in
-            defer {
-                isCreatingThread = false
-                onNewChatCreationStateChange(false)
-            }
+            createThreadErrorMessage = nil
+            isCreatingThread = true
+            defer { isCreatingThread = false }
 
             do {
                 let thread = try await WorktreeFlowCoordinator.startNewLocalChat(
@@ -302,7 +292,7 @@ struct SidebarView: View {
                 )
                 onOpenThread(thread)
             } catch {
-                guard let message = codex.userFacingTurnErrorMessageForFooter(from: error) else { return }
+                let message = error.localizedDescription
                 codex.lastErrorMessage = message
                 createThreadErrorMessage = message.isEmpty ? "Unable to create a chat right now." : message
             }
@@ -310,15 +300,10 @@ struct SidebarView: View {
     }
 
     private func handleNewWorktreeChatTap(preferredProjectPath: String) {
-        createThreadErrorMessage = nil
-        isCreatingThread = true
-        onNewChatCreationStateChange(true)
-        prepareSidebarForChatNavigation()
         Task { @MainActor in
-            defer {
-                isCreatingThread = false
-                onNewChatCreationStateChange(false)
-            }
+            createThreadErrorMessage = nil
+            isCreatingThread = true
+            defer { isCreatingThread = false }
 
             do {
                 let thread = try await WorktreeFlowCoordinator.startNewWorktreeChat(
@@ -327,7 +312,7 @@ struct SidebarView: View {
                 )
                 onOpenThread(thread)
             } catch {
-                guard let message = codex.userFacingTurnErrorMessageForFooter(from: error) else { return }
+                let message = error.localizedDescription
                 codex.lastErrorMessage = message
                 createThreadErrorMessage = message.isEmpty ? "Unable to create a worktree chat right now." : message
             }
@@ -336,21 +321,54 @@ struct SidebarView: View {
 
     private func selectThread(_ thread: CodexThread) {
         debugSidebarLog("selectThread id=\(thread.id) title=\(thread.displayTitle)")
-        prepareSidebarForChatNavigation()
+        searchText = ""
         onOpenThread(thread)
     }
 
-    private func openSettings() {
-        searchText = ""
-        isSearchActive = false
-        showSettings = true
-        onClose()
+    private func animateWithKeyboardNotification(
+        _ notification: Notification,
+        animations: @escaping (CGRect) -> Void,
+        completion: ((Bool) -> Void)? = nil
+    ) {
+        let userInfo = notification.userInfo ?? [:]
+        let keyboardFrame = (userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect) ?? .zero
+        let duration = (userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
+        let curveValue = (userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? Int) ?? UIView.AnimationCurve.easeInOut.rawValue
+        let curve = UIView.AnimationCurve(rawValue: curveValue) ?? .easeInOut
+
+        let animator = UIViewPropertyAnimator(duration: duration, curve: curve) {
+            animations(keyboardFrame)
+        }
+        if let completion {
+            animator.addCompletion { _ in
+                completion(true)
+            }
+        }
+        animator.startAnimation()
     }
 
-    // Clears sidebar-only input state before navigation so full-width search mode cannot hold the drawer open.
-    private func prepareSidebarForChatNavigation() {
+    private func keyboardOverlapHeight(for keyboardFrame: CGRect) -> CGFloat {
+        max(0, UIScreen.main.bounds.height - keyboardFrame.minY - bottomSafeAreaInset)
+    }
+
+    private var bottomSafeAreaInset: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .safeAreaInsets.bottom ?? 0
+    }
+
+    private func openSettings() {
+        guard !isOpeningSettings else { return }
+        let now = Date()
+        if let lastSettingsOpenAt, now.timeIntervalSince(lastSettingsOpenAt) < 0.5 {
+            return
+        }
+        lastSettingsOpenAt = now
+        isOpeningSettings = true
         searchText = ""
-        isSearchActive = false
+        showSettings = true
         onClose()
     }
 
@@ -374,26 +392,6 @@ struct SidebarView: View {
         projectGroupPendingArchive = nil
     }
 
-    // Removes every local chat for the selected project while leaving the desktop runtime untouched.
-    private func deletePendingProjectGroupLocally() {
-        guard let group = projectGroupPendingDeletion else { return }
-
-        let threadIDs = SidebarThreadGrouping.allThreadIDsForProjectGroup(group, in: codex.threads)
-        let selectedThreadWasDeleted = selectedThread.map { selected in
-            threadIDs.contains(selected.id)
-        } ?? false
-
-        _ = codex.deleteLocalThreadGroup(threadIDs: threadIDs)
-
-        if selectedThreadWasDeleted {
-            selectedThread = codex.threads.first { thread in
-                thread.syncState == .live && !threadIDs.contains(thread.id)
-            }
-        }
-
-        projectGroupPendingDeletion = nil
-    }
-
     // Rebuilds sidebar sections only when the source thread array changes.
     private func rebuildGroupedThreads() {
         let startedAt = Date()
@@ -404,15 +402,13 @@ struct SidebarView: View {
         } else {
             source = codex.threads.filter {
                 $0.displayTitle.localizedCaseInsensitiveContains(query)
-                || ($0.preview?.localizedCaseInsensitiveContains(query) ?? false)
                 || $0.projectDisplayName.localizedCaseInsensitiveContains(query)
-                || ($0.normalizedProjectPath?.localizedCaseInsensitiveContains(query) ?? false)
             }
         }
         let fingerprint = groupingFingerprint(query: query, source: source)
         guard fingerprint != lastGroupedThreadsFingerprint else { return }
         lastGroupedThreadsFingerprint = fingerprint
-        groupedThreads = SidebarThreadGrouping.makeGroups(from: source, pinnedThreadIDs: codex.pinnedThreadIDs)
+        groupedThreads = SidebarThreadGrouping.makeGroups(from: source)
         debugSidebarLog(
             "rebuildGroupedThreads durationMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) "
                 + "queryLength=\(query.count) sourceCount=\(source.count) groupCount=\(groupedThreads.count)"
@@ -422,7 +418,6 @@ struct SidebarView: View {
     private func groupingFingerprint(query: String, source: [CodexThread]) -> Int {
         var hasher = Hasher()
         hasher.combine(query)
-        hasher.combine(codex.pinnedThreadIDs)
         for thread in source {
             hasher.combine(thread)
         }
@@ -432,11 +427,7 @@ struct SidebarView: View {
     // Cheap fingerprint: hashes thread IDs + message revisions (O(n) integer work, no message access).
     private var diffFingerprint: Int {
         var hasher = Hasher()
-        let hasRunningTurn = codex.hasAnyRunningTurn
-        hasher.combine(hasRunningTurn)
-        guard !hasRunningTurn else {
-            return hasher.finalize()
-        }
+        hasher.combine(codex.hasAnyRunningTurn)
         for thread in codex.threads {
             hasher.combine(thread.id)
             hasher.combine(codex.messageRevision(for: thread.id))
@@ -526,55 +517,9 @@ struct SidebarView: View {
         codex.isConnected && codex.isInitialized
     }
 
-    // Sidebar refresh and search events can fire during gestures; logs must not mutate view state.
-    private func debugSidebarLog(_ message: @autoclosure () -> String) {
-        #if DEBUG
-        guard Self.isSidebarDebugLoggingEnabled else { return }
-        print("[SidebarData] \(message())")
-        #endif
-    }
-}
-
-private extension SidebarView {
-    static var isSidebarDebugLoggingEnabled: Bool { false }
-}
-
-private enum SidebarPresentedSheet: String, Identifiable {
-    case newChatProjectPicker
-    case localFolderBrowser
-
-    var id: String { rawValue }
-}
-
-private extension SidebarView {
-    @ViewBuilder
-    func sidebarSheetContent(_ sheet: SidebarPresentedSheet) -> some View {
-        switch sheet {
-        case .newChatProjectPicker:
-            SidebarNewChatProjectPickerSheet(
-                choices: newChatProjectChoices,
-                onSelectProject: { projectPath in
-                    activeSidebarSheet = nil
-                    handleNewChatTap(preferredProjectPath: projectPath)
-                },
-                onSelectWorktreeProject: { projectPath in
-                    activeSidebarSheet = nil
-                    handleNewWorktreeChatTap(preferredProjectPath: projectPath)
-                },
-                onSelectWithoutProject: {
-                    activeSidebarSheet = nil
-                    handleNewChatTap(preferredProjectPath: nil)
-                },
-                onBrowseLocalFolder: {
-                    presentLocalFolderBrowser()
-                }
-            )
-        case .localFolderBrowser:
-            SidebarLocalFolderBrowserSheet { projectPath in
-                activeSidebarSheet = nil
-                handleNewChatTap(preferredProjectPath: projectPath)
-            }
-        }
+    private func debugSidebarLog(_ message: String) {
+        sidebarDebugSequence += 1
+        print("[SidebarData] #\(sidebarDebugSequence) \(message)")
     }
 }
 
@@ -583,29 +528,126 @@ enum SidebarThreadsLoadingPresentation {
     static func shouldShowOverlay(isLoadingThreads: Bool, threadCount: Int) -> Bool {
         isLoadingThreads && threadCount == 0
     }
-
-    // Populated sidebars still need feedback while the complete metadata pass is running.
-    static func shouldShowInlineStatus(isLoadingThreads: Bool, threadCount: Int) -> Bool {
-        isLoadingThreads && threadCount > 0
-    }
 }
 
-private struct SidebarThreadsInlineLoadingView: View {
+private struct SidebarNewChatProjectPickerSheet: View {
+    let choices: [SidebarProjectChoice]
+    let onSelectProject: (String) -> Void
+    let onSelectWorktreeProject: (String) -> Void
+    let onSelectWithoutProject: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
     var body: some View {
-        HStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.small)
-            Text("Syncing chats")
-                .font(AppFont.caption())
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
+        NavigationStack {
+            List {
+                Section {
+                    Text("Choose a project for this chat.")
+                        .font(AppFont.body())
+                        .foregroundStyle(.secondary)
+                        .listRowBackground(Color.clear)
+                }
+
+                Section("Local") {
+                    ForEach(choices) { choice in
+                        Button {
+                            dismiss()
+                            onSelectProject(choice.projectPath)
+                        } label: {
+                            HStack(spacing: 12) {
+                                if choice.iconSystemName == "arrow.triangle.branch" {
+                                    CodexWorktreeIcon(pointSize: 16, weight: .medium)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Image(systemName: choice.iconSystemName)
+                                        .font(AppFont.body(weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                Text(choice.label)
+                                    .font(AppFont.body(weight: .semibold))
+                                    .foregroundStyle(.primary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+
+                if !choices.isEmpty {
+                    Section("Worktree") {
+                        ForEach(choices) { choice in
+                            Button {
+                                dismiss()
+                                onSelectWorktreeProject(choice.projectPath)
+                            } label: {
+                                HStack(alignment: .top, spacing: 12) {
+                                    CodexWorktreeIcon(pointSize: 16, weight: .medium)
+                                        .foregroundStyle(.secondary)
+
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(choice.label)
+                                            .font(AppFont.body(weight: .semibold))
+                                            .foregroundStyle(.primary)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                                        Text("Start a new chat in a managed detached worktree from the repo default branch.")
+                                            .font(AppFont.body())
+                                            .foregroundStyle(.secondary)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
+                    }
+                }
+
+                Section {
+                    Button {
+                        dismiss()
+                        onSelectWithoutProject()
+                    } label: {
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: "cloud")
+                                .font(AppFont.body(weight: .medium))
+                                .foregroundStyle(.secondary)
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Cloud")
+                                    .font(AppFont.body(weight: .semibold))
+                                    .foregroundStyle(.primary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                Text("Start a chat without a local working directory.")
+                                    .font(AppFont.body())
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+
+                Section {
+                    // Explains the existing scoping rule at the exact moment the user chooses it.
+                    Text("Chats started in a project stay scoped to that working directory. Worktree chats start in a managed detached worktree. If you pick Cloud, the chat is global.")
+                        .font(AppFont.caption())
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .listRowBackground(Color.clear)
+                }
+            }
+            .navigationTitle("Start new chat")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") {
+                        dismiss()
+                    }
+                }
+            }
         }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 10)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .presentationDetents(choices.count > 4 ? [.medium, .large] : [.medium])
     }
 }
-
-// SidebarNewChatProjectPickerSheet has moved to
-// Views/Sidebar/SidebarNewChatProjectPickerSheet.swift so it can carry its own
-// SwiftUI #Preview without dragging in the rest of the sidebar.

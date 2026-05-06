@@ -559,8 +559,10 @@ private func commandExecutionWorkingDirectoryCandidates(
     paramsObject: IncomingParamsObject?
 ) -> [String?] {
     [
+        payloadObject["workdir"]?.stringValue,
         payloadObject["cwd"]?.stringValue,
         payloadObject["working_directory"]?.stringValue,
+        paramsObject?["workdir"]?.stringValue,
         paramsObject?["cwd"]?.stringValue,
     ]
 }

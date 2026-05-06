@@ -7,9 +7,9 @@
 import Foundation
 
 private let minimumBridgePackageUpdateCommand = "npm install -g remodex@latest"
-private let forcedBridgeUpgradeFromVersion = "1.3.8"
-private let forcedBridgeUpgradeTargetVersion = "1.3.9"
-private let forcedBridgeUpgradeCommand = "npm install -g remodex@1.3.9"
+private let forcedBridgeUpgradeFromVersion = "1.3.7"
+private let forcedBridgeUpgradeTargetVersion = "1.3.8"
+private let forcedBridgeUpgradeCommand = "npm install -g remodex@1.3.8"
 
 enum CodexGPTAccountStatus: String, Codable, Sendable {
     case unknown
@@ -30,8 +30,6 @@ struct CodexGPTAccountSnapshot: Codable, Equatable, Sendable {
     var email: String?
     var displayName: String?
     var planType: String?
-    var hostPlatform: CodexBridgeHostPlatform?
-    var hostCapabilities: CodexBridgeHostCapabilities?
     var loginInFlight: Bool
     var needsReauth: Bool
     var expiresAt: Date?
@@ -99,40 +97,6 @@ struct CodexGPTAccountSnapshot: Codable, Equatable, Sendable {
     }()
 }
 
-enum CodexBridgeHostPlatform: String, Codable, Sendable {
-    case macOS = "macos"
-    case linux
-    case windows
-    case unknown
-
-    var displayName: String {
-        switch self {
-        case .macOS:
-            return "Mac"
-        case .linux:
-            return "Linux computer"
-        case .windows:
-            return "Windows computer"
-        case .unknown:
-            return "computer"
-        }
-    }
-}
-
-struct CodexBridgeHostCapabilities: Codable, Equatable, Sendable {
-    var desktopHandoff: Bool = false
-    var displayWake: Bool = false
-    var keepAwake: Bool = false
-    var hostBrowserLogin: Bool = false
-
-    static let legacyMacOS = CodexBridgeHostCapabilities(
-        desktopHandoff: true,
-        displayWake: true,
-        keepAwake: true,
-        hostBrowserLogin: true
-    )
-}
-
 func codexGPTAccountInitialSnapshot() -> CodexGPTAccountSnapshot {
     CodexGPTAccountSnapshot(
         status: .unknown,
@@ -140,8 +104,6 @@ func codexGPTAccountInitialSnapshot() -> CodexGPTAccountSnapshot {
         email: nil,
         displayName: nil,
         planType: nil,
-        hostPlatform: nil,
-        hostCapabilities: nil,
         loginInFlight: false,
         needsReauth: false,
         expiresAt: nil,
@@ -326,6 +288,22 @@ extension CodexService {
         gptAccountErrorMessage = nil
     }
 
+    // Restarts the local Codex runtime on the Mac so Remodex picks up a freshly switched account.
+    func refreshGPTAccountSessionOnMac() async {
+        guard isConnected else {
+            gptAccountErrorMessage = CodexServiceError.disconnected.localizedDescription
+            return
+        }
+
+        do {
+            _ = try await sendRequest(method: "account/refreshOnMac", params: nil)
+            gptAccountErrorMessage = nil
+            await refreshGPTAccountState()
+        } catch {
+            gptAccountErrorMessage = error.localizedDescription
+        }
+    }
+
     // Keeps the account card honest when voice auth proves the bridge token is no longer usable.
     func markGPTVoiceReauthenticationRequired() {
         stopGPTLoginSync()
@@ -338,7 +316,7 @@ extension CodexService {
                 retaining: gptAccountSnapshot
             )
         )
-        gptAccountErrorMessage = "ChatGPT voice needs a fresh sign-in on your paired computer."
+        gptAccountErrorMessage = "ChatGPT voice needs a fresh sign-in on your Mac."
     }
 
     // Stores an incoming deep-link callback and completes the pending login when the bridge is reachable.
@@ -697,7 +675,6 @@ extension CodexService {
             in: payloadObject,
             keys: ["bridgeLatestVersion", "bridge_latest_version", "bridgePublishedVersion", "bridge_published_version"]
         )
-        applyBridgeHostMetadata(from: payloadObject)
         evaluateRequiredBridgePackageVersion(
             from: payloadObject,
             allowMissingVersionPrompt: allowMissingVersionPrompt
@@ -714,16 +691,6 @@ extension CodexService {
         }
 
         return CodexRuntimeTransportMode(rawValue: rawValue) ?? .unknown
-    }
-
-    private func applyBridgeHostMetadata(from payloadObject: IncomingParamsObject) {
-        gptAccountSnapshot.hostPlatform = decodeBridgeHostPlatform(
-            from: firstStringValue(
-                in: payloadObject,
-                keys: ["hostPlatform", "host_platform", "bridgeHostPlatform", "bridge_host_platform"]
-            )
-        )
-        gptAccountSnapshot.hostCapabilities = decodeBridgeHostCapabilities(from: payloadObject)
     }
 
     private func handleBridgeManagedAccountRefreshFailure() {
@@ -800,14 +767,14 @@ extension CodexService {
         if let currentVersion = currentVersion?.trimmingCharacters(in: .whitespacesAndNewlines),
            !currentVersion.isEmpty {
             message =
-                "This computer bridge is running Remodex \(currentVersion), but this iPhone app requires Remodex \(CodexService.minimumSupportedBridgePackageVersion) or newer. Update the npm package on your computer, then reconnect."
+                "This Mac bridge is running Remodex \(currentVersion), but this iPhone app requires Remodex \(CodexService.minimumSupportedBridgePackageVersion) or newer. Update the npm package on your Mac, then reconnect."
         } else {
             message =
-                "This computer bridge is too old for this version of Remodex iPhone. Update the Remodex npm package on your computer to \(CodexService.minimumSupportedBridgePackageVersion) or newer, then reconnect."
+                "This Mac bridge is too old for this version of Remodex iPhone. Update the Remodex npm package on your Mac to \(CodexService.minimumSupportedBridgePackageVersion) or newer, then reconnect."
         }
 
         return CodexBridgeUpdatePrompt(
-            title: "Update Remodex on your computer to reconnect",
+            title: "Update Remodex on your Mac to reconnect",
             message: message,
             command: minimumBridgePackageUpdateCommand
         )
@@ -868,16 +835,16 @@ extension CodexService {
         latestVersion: String
     ) -> CodexBridgeUpdatePrompt {
         CodexBridgeUpdatePrompt(
-            title: "A newer Remodex update is available on your computer",
-            message: "This computer bridge is running Remodex \(currentVersion), and npm now has Remodex \(latestVersion). Update the package on your computer when you're ready, then reconnect to start using the newer build.",
+            title: "A newer Remodex update is available on your Mac",
+            message: "This Mac bridge is running Remodex \(currentVersion), and npm now has Remodex \(latestVersion). Update the package on your Mac when you're ready, then reconnect to start using the newer build.",
             command: minimumBridgePackageUpdateCommand
         )
     }
 
     private func forcedBridgePackageUpdatePrompt(currentVersion: String) -> CodexBridgeUpdatePrompt {
         CodexBridgeUpdatePrompt(
-            title: "Update Remodex on your computer to reconnect",
-            message: "This computer bridge is running Remodex \(currentVersion). Update the Remodex CLI on your computer to \(forcedBridgeUpgradeTargetVersion), then reconnect.",
+            title: "Update Remodex on your Mac to reconnect",
+            message: "This Mac bridge is running Remodex \(currentVersion). Update the Remodex CLI on your Mac to \(forcedBridgeUpgradeTargetVersion), then reconnect.",
             command: forcedBridgeUpgradeCommand
         )
     }
@@ -961,13 +928,6 @@ extension CodexService {
             email: firstStringValue(in: payloadObject, keys: ["email"]),
             displayName: nil,
             planType: firstStringValue(in: payloadObject, keys: ["planType", "plan_type"]),
-            hostPlatform: decodeBridgeHostPlatform(
-                from: firstStringValue(
-                    in: payloadObject,
-                    keys: ["hostPlatform", "host_platform", "bridgeHostPlatform", "bridge_host_platform"]
-                )
-            ),
-            hostCapabilities: decodeBridgeHostCapabilities(from: payloadObject),
             loginInFlight: hasPendingLogin,
             needsReauth: escalatedNeedsReauth,
             expiresAt: firstDateValue(in: payloadObject, keys: ["expiresAt", "expires_at"]),
@@ -1006,8 +966,6 @@ extension CodexService {
             email: gptAccountSnapshot.email,
             displayName: gptAccountSnapshot.displayName,
             planType: gptAccountSnapshot.planType,
-            hostPlatform: gptAccountSnapshot.hostPlatform,
-            hostCapabilities: gptAccountSnapshot.hostCapabilities,
             loginInFlight: currentPendingGPTLogin() != nil,
             needsReauth: false,
             expiresAt: currentPendingGPTLogin()?.expiresAt,
@@ -1027,8 +985,6 @@ extension CodexService {
             email: snapshot.email,
             displayName: snapshot.displayName,
             planType: snapshot.planType,
-            hostPlatform: snapshot.hostPlatform,
-            hostCapabilities: snapshot.hostCapabilities,
             loginInFlight: true,
             needsReauth: false,
             expiresAt: expiresAt,
@@ -1049,8 +1005,6 @@ extension CodexService {
             email: needsReauth ? snapshot.email : nil,
             displayName: needsReauth ? snapshot.displayName : nil,
             planType: needsReauth ? snapshot.planType : nil,
-            hostPlatform: snapshot.hostPlatform,
-            hostCapabilities: snapshot.hostCapabilities,
             loginInFlight: false,
             needsReauth: needsReauth,
             expiresAt: nil,
@@ -1066,11 +1020,9 @@ extension CodexService {
         needsReauth: Bool,
         hasLegacyAuthToken: Bool = false
     ) -> Bool {
-        if let tokenReady = firstBoolValue(in: payloadObject, keys: ["tokenReady", "token_ready"]) {
-            return tokenReady
-        }
-
-        return hasLegacyAuthToken && status == .authenticated && !needsReauth
+        firstBoolValue(in: payloadObject, keys: ["tokenReady", "token_ready"])
+            ?? (hasLegacyAuthToken && status == .authenticated && !needsReauth)
+            ?? (status == .authenticated && !needsReauth)
     }
 
     func resolvedTokenUnavailableSince(
@@ -1145,33 +1097,6 @@ extension CodexService {
         default:
             return nil
         }
-    }
-
-    func decodeBridgeHostPlatform(from value: String?) -> CodexBridgeHostPlatform? {
-        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-              !value.isEmpty else {
-            return nil
-        }
-
-        return CodexBridgeHostPlatform(rawValue: value) ?? .unknown
-    }
-
-    func decodeBridgeHostCapabilities(from payloadObject: IncomingParamsObject) -> CodexBridgeHostCapabilities? {
-        let capabilitiesObject = payloadObject["hostCapabilities"]?.objectValue
-            ?? payloadObject["host_capabilities"]?.objectValue
-            ?? payloadObject["bridgeHostCapabilities"]?.objectValue
-            ?? payloadObject["bridge_host_capabilities"]?.objectValue
-
-        guard let capabilitiesObject else {
-            return nil
-        }
-
-        return CodexBridgeHostCapabilities(
-            desktopHandoff: firstBoolValue(in: capabilitiesObject, keys: ["desktopHandoff", "desktop_handoff"]) ?? false,
-            displayWake: firstBoolValue(in: capabilitiesObject, keys: ["displayWake", "display_wake"]) ?? false,
-            keepAwake: firstBoolValue(in: capabilitiesObject, keys: ["keepAwake", "keep_awake"]) ?? false,
-            hostBrowserLogin: firstBoolValue(in: capabilitiesObject, keys: ["hostBrowserLogin", "host_browser_login"]) ?? false
-        )
     }
 
     func firstStringValue(in object: IncomingParamsObject?, keys: [String]) -> String? {

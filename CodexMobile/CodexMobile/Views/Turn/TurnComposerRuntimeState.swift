@@ -6,20 +6,19 @@
 
 import Foundation
 
-struct TurnComposerRuntimeState: Equatable {
+struct TurnComposerRuntimeState {
     let reasoningDisplayOptions: [TurnComposerReasoningDisplayOption]
     let effectiveReasoningEffort: String?
     let selectedReasoningEffort: String?
     let reasoningMenuDisabled: Bool
     let selectedServiceTier: CodexServiceTier?
-    let supportsFastMode: Bool
 
     var selectedReasoningTitle: String {
         effectiveReasoningEffort.map(TurnComposerMetaMapper.reasoningTitle(for:)) ?? "Select reasoning"
     }
 
     var showsSpeedBadgeInModelMenu: Bool {
-        supportsFastMode && selectedServiceTier != nil
+        selectedServiceTier != nil
     }
 
     func isSelectedReasoning(_ effort: String) -> Bool {
@@ -30,6 +29,7 @@ struct TurnComposerRuntimeState: Equatable {
         selectedServiceTier == serviceTier
     }
 
+    @MainActor
     static func resolve(
         codex: CodexService,
         reasoningDisplayOptions: [TurnComposerReasoningDisplayOption]
@@ -39,8 +39,7 @@ struct TurnComposerRuntimeState: Equatable {
             effectiveReasoningEffort: codex.selectedReasoningEffortForSelectedModel(),
             selectedReasoningEffort: codex.selectedReasoningEffort,
             reasoningMenuDisabled: reasoningDisplayOptions.isEmpty || codex.selectedModelOption() == nil,
-            selectedServiceTier: codex.effectiveServiceTier(),
-            supportsFastMode: codex.selectedModelSupportsServiceTier(.fast)
+            selectedServiceTier: codex.selectedServiceTier
         )
     }
 }

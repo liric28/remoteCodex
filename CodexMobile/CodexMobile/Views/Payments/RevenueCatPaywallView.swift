@@ -5,7 +5,6 @@
 // Depends on: SwiftUI, SubscriptionService
 
 import RevenueCat
-import StoreKit
 import SwiftUI
 
 struct RevenueCatPaywallPreviewPlan: Identifiable, Equatable {
@@ -48,7 +47,6 @@ struct RevenueCatPaywallView: View {
     @State private var selectedPackageID: String?
     @State private var appeared = false
     @State private var showCloseButton = false
-    @State private var isPresentingOfferCodeRedemption = false
 
     private let dismissable: Bool
     private let previewPlans: [RevenueCatPaywallPreviewPlan]?
@@ -113,9 +111,6 @@ struct RevenueCatPaywallView: View {
                 }
             }
             .interactiveDismissDisabled(!dismissable)
-            .offerCodeRedemption(isPresented: $isPresentingOfferCodeRedemption) { result in
-                handleOfferCodeRedemptionCompletion(result)
-            }
             .task {
                 guard !isPreviewMode else {
                     seedDefaultSelectionIfNeeded()
@@ -161,7 +156,7 @@ struct RevenueCatPaywallView: View {
             Text("Unlock Remodex Pro")
                 .font(AppFont.system(size: 24, weight: .bold))
 
-            Text("Everything runs on your computer. Your phone is the remote.")
+            Text("Everything runs on your Mac. Your phone is the remote.")
                 .font(AppFont.caption())
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -250,12 +245,6 @@ struct RevenueCatPaywallView: View {
                     }
                     .disabled(subscriptions.isPurchasing || subscriptions.isRestoring)
 
-                    Text(" · ").foregroundStyle(.secondary)
-                    Button("Redeem Code") {
-                        isPresentingOfferCodeRedemption = true
-                    }
-                    .disabled(subscriptions.isPurchasing || subscriptions.isRestoring)
-
                     if let managementURL {
                         Text(" · ").foregroundStyle(.secondary)
                         Button("Manage") {
@@ -284,7 +273,7 @@ struct RevenueCatPaywallView: View {
             }
 
             if let error = errorMessage, !error.isEmpty {
-                Text(error)
+                Text(localizedAppMessage(error))
                     .font(AppFont.caption())
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.center)
@@ -488,20 +477,6 @@ struct RevenueCatPaywallView: View {
         }
 
         selectedPackageID = displayedPlans.first?.id
-    }
-
-    private func handleOfferCodeRedemptionCompletion(_ result: Result<Void, any Error>) {
-        guard !isPreviewMode else {
-            return
-        }
-
-        Task {
-            if case .failure = result {
-                await subscriptions.refreshCustomerInfoSilently()
-            } else {
-                await subscriptions.syncPurchasesAfterOfferCodeRedemption()
-            }
-        }
     }
 }
 

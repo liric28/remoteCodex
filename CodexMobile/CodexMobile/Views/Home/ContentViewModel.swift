@@ -418,7 +418,7 @@ extension ContentViewModel {
             return .stop
         } catch {
             if !codex.hasSavedRelaySession {
-                codex.lastErrorMessage = codex.userFacingTurnErrorMessageForFooter(from: error)
+                codex.lastErrorMessage = error.localizedDescription
             }
             return .fallbackToSaved
         }
@@ -441,10 +441,8 @@ extension ContentViewModel {
         switch error {
         case .unsupportedRelay:
             if !codex.hasSavedRelaySession {
-                codex.secureConnectionState = .liveSessionUnresolved
                 codex.connectionRecoveryState = .idle
-                codex.shouldAutoReconnectOnForeground = false
-                codex.lastErrorMessage = "Trusted reconnect is unavailable from this relay endpoint. Update or check the relay/proxy, then reconnect. Scan a new QR code only if this Mac was reset."
+                codex.lastErrorMessage = "This relay needs a fresh QR scan before trusted reconnect is available."
                 return .stop
             }
             return .fallbackToSaved
@@ -454,7 +452,7 @@ extension ContentViewModel {
                 return .fallbackToSaved
             }
             codex.connectionRecoveryState = .idle
-            codex.lastErrorMessage = message
+            codex.lastErrorMessage = macBridgeRestartInstructionMessage(message)
             return .stop
         case .rePairRequired(let message):
             codex.connectionRecoveryState = .idle
@@ -464,8 +462,12 @@ extension ContentViewModel {
         case .noTrustedMac:
             return .fallbackToSaved
         case .invalidResponse(let message), .network(let message):
+            if shouldStopOnUnreachableLocalOnlyRelay(codex: codex) {
+                codex.connectionRecoveryState = .idle
+                codex.lastErrorMessage = codex.localOnlyRelayReconnectMessage(for: codex.preferredWakeRelayURL)
+                return .stop
+            }
             if !codex.hasSavedRelaySession {
-                codex.secureConnectionState = .liveSessionUnresolved
                 codex.lastErrorMessage = message
             }
             return .fallbackToSaved
@@ -479,6 +481,20 @@ extension ContentViewModel {
             return nil
         }
         return "\(relayURL)/\(sessionId)"
+    }
+
+    // Avoids retrying both trusted-session resolve and raw websocket against the same local-only relay
+    // when the phone is off that LAN/VPN; that path cannot recover without a reachable network.
+    private func shouldStopOnUnreachableLocalOnlyRelay(codex: CodexService) -> Bool {
+        let trustedRelayURL = codex.preferredTrustedReconnectRelayURL
+        let savedRelayURL = codex.normalizedRelayURL
+
+        let hasLocalOnlyCandidate = codex.localOnlyRelayURL(trustedRelayURL) != nil
+            || codex.localOnlyRelayURL(savedRelayURL) != nil
+        let hasNonLocalCandidate = codex.nonLocalRelayURL(trustedRelayURL) != nil
+            || codex.nonLocalRelayURL(savedRelayURL) != nil
+
+        return hasLocalOnlyCandidate && !hasNonLocalCandidate
     }
 
     // Centralizes reconnect sleeps so manual retry can interrupt stale foreground backoff quickly.

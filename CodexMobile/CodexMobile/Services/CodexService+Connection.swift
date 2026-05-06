@@ -15,8 +15,6 @@ extension CodexService {
     private static let permanentRelayCloseCodeRawValues: Set<UInt16> = [4000, 4001, 4003]
     private static let explicitRelayDropCloseCodeRawValues: Set<UInt16> = [4004]
     private static let maxTrustedReconnectFailures = 3
-    private static let connectionBootstrapRequestTimeoutNanoseconds: UInt64 = 12_000_000_000
-    private static let planModeProbeTimeoutNanoseconds: UInt64 = 5_000_000_000
     private static let trustedReconnectRecoveryMessage =
         "Secure reconnect could not be restored from the saved session. Try reconnecting again."
 
@@ -96,16 +94,17 @@ extension CodexService {
             try await performSecureHandshake()
 
             isConnected = true
-            lastErrorMessage = nil
-            try await initializeSession()
             shouldAutoReconnectOnForeground = false
             connectionRecoveryState = .idle
+            lastErrorMessage = nil
+            try await initializeSession()
             trustedReconnectFailureCount = 0
             if secureSession != nil {
                 secureConnectionState = .encrypted
             }
 
             startSyncLoop()
+            startWebSocketHeartbeat()
             // Push registration is best-effort and talks to the bridge, so it must not
             // hold the main connect path hostage when the managed backend is slow.
             Task { @MainActor [weak self] in
@@ -137,6 +136,7 @@ extension CodexService {
 
     // Closes the socket and fails any in-flight requests.
     func disconnect(preserveReconnectIntent: Bool = false) async {
+        stopWebSocketHeartbeat()
         cancelCurrentSocketConnection()
 
         isConnected = false
@@ -153,13 +153,10 @@ extension CodexService {
         removeAllThreadTimelineState()
         assistantRevertStateCacheByThread.removeAll()
         assistantRevertStateRevision = 0
-        workspaceCheckpointCopyTaskByTurnID.values.forEach { $0.cancel() }
-        workspaceCheckpointCopyTaskByTurnID.removeAll()
         supportsServiceTier = true
         hasPresentedServiceTierBridgeUpdatePrompt = false
         supportsBridgeVoiceAuth = true
         supportsThreadFork = true
-        supportsTurnPagination = true
         hasPresentedThreadForkBridgeUpdatePrompt = false
         hasPresentedMinimumBridgePackageUpdatePrompt = false
         lastPresentedAvailableBridgePackageVersion = nil
@@ -174,7 +171,6 @@ extension CodexService {
             connectionRecoveryState = .idle
         }
         supportsStructuredSkillInput = true
-        supportsStructuredMentionInput = true
         supportsTurnCollaborationMode = false
         hasResolvedRateLimitsSnapshot = false
         bridgeInstalledVersion = nil
@@ -199,7 +195,7 @@ extension CodexService {
     }
 
     func syncBridgeKeepMacAwakePreferenceIfNeeded(showFailureInUI: Bool = false) async {
-        guard isConnected, supportsKeepAwakeWhileBridgeRuns else {
+        guard isConnected else {
             return
         }
 
@@ -211,12 +207,12 @@ extension CodexService {
             )
         } catch {
             if showFailureInUI {
-                lastErrorMessage = userFacingTurnErrorMessageForFooter(from: error)
+                lastErrorMessage = error.localizedDescription
             }
         }
     }
 
-    // Clears all remembered relay metadata when the pairing itself is no longer trustworthy.
+    // Clears the remembered relay pairing when the remote Mac session is gone for good.
     func clearSavedRelaySession() {
         SecureStore.deleteValue(for: CodexSecureKeys.relaySessionId)
         SecureStore.deleteValue(for: CodexSecureKeys.relayUrl)
@@ -239,26 +235,6 @@ extension CodexService {
             secureConnectionState = .notPaired
             secureMacFingerprint = nil
         }
-        pendingNotificationOpenThreadID = nil
-        lastPushRegistrationSignature = nil
-        clearTransientConnectionPrompts()
-    }
-
-    // Drops only the per-launch relay session after repeated trusted reconnect failures.
-    func clearStaleSavedRelaySessionForTrustedReconnect() {
-        guard let trustedMac = preferredTrustedMacRecord else {
-            clearSavedRelaySession()
-            return
-        }
-
-        SecureStore.deleteValue(for: CodexSecureKeys.relaySessionId)
-        SecureStore.deleteValue(for: CodexSecureKeys.relayLastAppliedBridgeOutboundSeq)
-        relaySessionId = nil
-        lastAppliedBridgeOutboundSeq = 0
-        shouldForceQRBootstrapOnNextHandshake = false
-        trustedReconnectFailureCount = 0
-        secureConnectionState = .liveSessionUnresolved
-        secureMacFingerprint = codexSecureFingerprint(for: trustedMac.macIdentityPublicKey)
         pendingNotificationOpenThreadID = nil
         lastPushRegistrationSignature = nil
         clearTransientConnectionPrompts()
@@ -320,13 +296,7 @@ extension CodexService {
         ])
 
         do {
-            let initializeResponse = try await sendRequest(
-                method: "initialize",
-                params: modernParams,
-                timeoutNanoseconds: Self.connectionBootstrapRequestTimeoutNanoseconds,
-                timeoutMessage: "Connection timed out while reconnecting. Try again."
-            )
-            learnTurnPaginationSupportFromInitializeResponse(initializeResponse)
+            _ = try await sendRequest(method: "initialize", params: modernParams)
             // A successful modern initialize means the runtime accepted the experimental
             // capability negotiation. Keep plan-mode sends enabled unless the runtime
             // explicitly rejects `collaborationMode` on a turn request later.
@@ -353,13 +323,7 @@ extension CodexService {
                 "clientInfo": clientInfo,
             ])
             do {
-                let initializeResponse = try await sendRequest(
-                    method: "initialize",
-                    params: legacyParams,
-                    timeoutNanoseconds: Self.connectionBootstrapRequestTimeoutNanoseconds,
-                    timeoutMessage: "Connection timed out while reconnecting. Try again."
-                )
-                learnTurnPaginationSupportFromInitializeResponse(initializeResponse)
+                _ = try await sendRequest(method: "initialize", params: legacyParams)
             } catch {
                 if let incompatibleAppVersionError = incompatibleBridgeAppVersionError(from: error) {
                     throw incompatibleAppVersionError
@@ -400,12 +364,12 @@ extension CodexService {
         } else if let bridgeVersion, !bridgeVersion.isEmpty,
                   let minimumSupportedAppVersion, !minimumSupportedAppVersion.isEmpty {
             promptMessage =
-                "This computer bridge is running Remodex \(bridgeVersion), which requires Remodex iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
+                "This Mac bridge is running Remodex \(bridgeVersion), which requires Remodex iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
         } else if let minimumSupportedAppVersion, !minimumSupportedAppVersion.isEmpty {
             promptMessage =
-                "This computer bridge requires Remodex iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
+                "This Mac bridge requires Remodex iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
         } else {
-            promptMessage = "This computer bridge requires a newer Remodex iPhone app. Update the app, then reconnect."
+            promptMessage = "This Mac bridge requires a newer Remodex iPhone app. Update the app, then reconnect."
         }
 
         bridgeUpdatePrompt = CodexBridgeUpdatePrompt(
@@ -421,17 +385,17 @@ extension CodexService {
         if let bridgeVersion, !bridgeVersion.isEmpty,
            let minimumSupportedAppVersion, !minimumSupportedAppVersion.isEmpty {
             return .invalidInput(
-                "This computer bridge is running Remodex \(bridgeVersion), which requires Remodex iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
+                "This Mac bridge is running Remodex \(bridgeVersion), which requires Remodex iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
             )
         }
 
         if let minimumSupportedAppVersion, !minimumSupportedAppVersion.isEmpty {
             return .invalidInput(
-                "This computer bridge requires Remodex iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
+                "This Mac bridge requires Remodex iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
             )
         }
 
-        return .invalidInput("This computer bridge requires a newer Remodex iPhone app. Update the app, then reconnect.")
+        return .invalidInput("This Mac bridge requires a newer Remodex iPhone app. Update the app, then reconnect.")
     }
 
     // Classifies socket failures so transient relay hiccups reconnect, while dead pairings are forgotten.
@@ -444,6 +408,7 @@ extension CodexService {
         }
 
         cancelCurrentSocketConnection()
+        stopWebSocketHeartbeat()
 
         let disposition = receiveErrorDisposition(for: error, relayCloseCode: relayCloseCode)
         isConnected = false
@@ -495,9 +460,8 @@ extension CodexService {
 
     // Runs the post-connect sync work that is useful but not required to mark the socket usable.
     func performPostConnectSyncPass(preferredThreadId: String? = nil) async {
-        // Thread metadata drives the visible app shell, so do it before slower runtime option sync.
-        try? await listThreads()
         try? await listModels()
+        try? await listThreads()
         if await routePendingNotificationOpenIfPossible(refreshIfNeeded: false) {
             return
         }
@@ -531,8 +495,10 @@ extension CodexService {
         }
     }
 
-    // Clears volatile runtime state on server switch.
+    // Clears volatile runtime state on server/Mac switch so the next sync starts from the
+    // new bridge's authoritative thread list instead of merging in stale local-only rows.
     func resetThreadRuntimeStateForServerSwitch() {
+        threads = []
         activeThreadId = nil
         activeTurnId = nil
         activeTurnIdByThread.removeAll()
@@ -548,13 +514,10 @@ extension CodexService {
         removeAllThreadTimelineState()
         assistantRevertStateCacheByThread.removeAll()
         assistantRevertStateRevision = 0
-        workspaceCheckpointCopyTaskByTurnID.values.forEach { $0.cancel() }
-        workspaceCheckpointCopyTaskByTurnID.removeAll()
         supportsServiceTier = true
         hasPresentedServiceTierBridgeUpdatePrompt = false
         supportsBridgeVoiceAuth = true
         supportsThreadFork = true
-        supportsTurnPagination = true
         hasPresentedThreadForkBridgeUpdatePrompt = false
         hasPresentedMinimumBridgePackageUpdatePrompt = false
         lastPresentedAvailableBridgePackageVersion = nil
@@ -568,7 +531,6 @@ extension CodexService {
         shouldAutoReconnectOnForeground = false
         connectionRecoveryState = .idle
         supportsStructuredSkillInput = true
-        supportsStructuredMentionInput = true
         supportsTurnCollaborationMode = false
         bridgeInstalledVersion = nil
         latestBridgePackageVersion = nil
@@ -586,6 +548,7 @@ extension CodexService {
 
     // Removes the current socket reference before reconnect/teardown logic mutates shared state.
     private func cancelCurrentSocketConnection() {
+        stopWebSocketHeartbeat()
         if let connection = webSocketConnection {
             connection.stateUpdateHandler = nil
             webSocketConnection = nil
@@ -664,14 +627,13 @@ extension CodexService {
         return true
     }
 
-    // Preserves trusted Mac identity while removing only the stale per-launch relay session.
+    // Drops only the stale saved relay session after repeated secure reconnect failures.
+    // This preserves the trusted Mac record, but stops looping on a dead session id forever.
     func recoverTrustedReconnectCandidate() {
         if hasSavedRelaySession {
-            clearStaleSavedRelaySessionForTrustedReconnect()
-        } else if preferredTrustedMacRecord != nil {
-            secureConnectionState = .liveSessionUnresolved
-        } else {
             clearSavedRelaySession()
+        } else {
+            secureConnectionState = .liveSessionUnresolved
         }
         lastErrorMessage = Self.trustedReconnectRecoveryMessage
     }
@@ -683,8 +645,8 @@ extension CodexService {
     ) -> ReceiveErrorDisposition {
         let shouldClearSavedRelaySession = shouldClearSavedRelaySession(for: relayCloseCode)
         let retryableSessionUnavailableMessage = retryableSessionUnavailableMessage(for: relayCloseCode)
-        // Only relay closes that preserve the saved session should stay on this socket path;
-        // stale live sessions recover through trusted resolve instead of immediate QR.
+        // Only relay closes that preserve the saved session should stay on the
+        // auto-reconnect path; dead sessions must fall back to QR recovery.
         let permanentRelayMessage = shouldClearSavedRelaySession
             ? (permanentRelayDisconnectMessage(for: relayCloseCode)
                 ?? "This relay pairing is no longer valid. Scan a new QR code to reconnect.")
@@ -754,9 +716,7 @@ extension CodexService {
         do {
             let response = try await sendRequest(
                 method: "collaborationMode/list",
-                params: .object([:]),
-                timeoutNanoseconds: Self.planModeProbeTimeoutNanoseconds,
-                timeoutMessage: "collaborationMode/list timed out while checking runtime capabilities."
+                params: .object([:])
             )
             return responseContainsPlanCollaborationMode(response)
         } catch {
@@ -810,6 +770,30 @@ extension CodexService {
         return url
     }
 
+    func relayRequiresSharedLocalNetwork(_ relayURL: String?) -> Bool {
+        guard let relayURL = relayURL?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let url = URL(string: relayURL) else {
+            return false
+        }
+
+        guard let host = url.host?.lowercased() else {
+            return false
+        }
+
+        return host.hasSuffix(".local")
+            || isPrivateIPv4Host(host)
+            || isLocalIPv6Host(host)
+    }
+
+    func localOnlyRelayReconnectMessage(for relayURL: String?) -> String {
+        let trimmedRelayURL = relayURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmedRelayURL.isEmpty {
+            return "This Mac is paired through a local-only relay. Reconnect requires the iPhone to be on the same LAN or shared VPN/Tailscale network."
+        }
+
+        return "This Mac is paired through a local-only relay at \(trimmedRelayURL). Reconnect requires the iPhone to be on the same LAN or shared VPN/Tailscale network."
+    }
+
     func userFacingConnectError(error: Error, attemptedURL: String, host: String?) -> String {
         if let nwError = error as? NWError {
             switch nwError {
@@ -818,7 +802,10 @@ extension CodexService {
             case .posix(let code) where code == .EMSGSIZE:
                 return oversizedRelayPayloadMessage
             case .posix(let code) where code == .ENETDOWN || code == .ENETUNREACH || code == .EHOSTUNREACH:
-                return "Cannot reach relay server at \(attemptedURL). Check that the iPhone can access the paired computer on the local network."
+                if relayRequiresSharedLocalNetwork(attemptedURL) {
+                    return "Cannot reach local-only relay server at \(attemptedURL). Make sure the iPhone is on the same LAN or shared VPN/Tailscale network as this Mac."
+                }
+                return "Cannot reach relay server at \(attemptedURL). Check your network connection and relay reachability."
             case .posix(let code) where code == .ETIMEDOUT:
                 return "Connection timed out. Check server/network."
             case .dns(let code):
@@ -881,6 +868,11 @@ extension CodexService {
     }
 
     func isRecoverableTransientConnectionError(_ error: Error) -> Bool {
+        if let secureError = error as? CodexSecureTransportError,
+           case .timedOut = secureError {
+            return true
+        }
+
         if let serviceError = error as? CodexServiceError {
             if case .invalidInput(let message) = serviceError {
                 return message.localizedCaseInsensitiveContains("timed out")
@@ -1042,7 +1034,7 @@ extension CodexService {
 
         switch rawValue {
         case 4001:
-            return "This relay session was replaced by another computer connection. Scan a new QR code to reconnect."
+            return "This relay session was replaced by another Mac connection. Scan a new QR code to reconnect."
         case 4003:
             return "This device was replaced by a newer connection. Scan a new QR code to reconnect."
         default:
@@ -1056,7 +1048,7 @@ extension CodexService {
             return nil
         }
 
-        return "Trying to reach your saved computer. Remodex will keep retrying. If you restarted the bridge on that computer, scan the new QR code."
+        return "Trying to reach your saved Mac. Remodex will keep retrying. If you restarted the bridge on your Mac, scan the new QR code."
     }
 
     func retryableSessionUnavailableMessage(forConnectError error: Error) -> String? {
@@ -1064,7 +1056,7 @@ extension CodexService {
             return nil
         }
 
-        return "Trying to reach your saved computer. Remodex will keep retrying. If you restarted the bridge on that computer, scan the new QR code."
+        return "Trying to reach your saved Mac. Remodex will keep retrying. If you restarted the bridge on your Mac, scan the new QR code."
     }
 
     // Surfaces relay-enforced drops that keep the pairing valid but lost the current send.
@@ -1074,7 +1066,7 @@ extension CodexService {
             return nil
         }
 
-        return "The paired computer was temporarily unavailable and this message could not be delivered. Wait a moment, then try again."
+        return "The Mac was temporarily unavailable and this message could not be delivered. Wait a moment, then try again."
     }
 
     func shouldClearSavedRelaySession(for closeCode: NWProtocolWebSocket.CloseCode?) -> Bool {

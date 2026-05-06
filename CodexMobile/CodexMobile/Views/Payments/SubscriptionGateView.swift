@@ -2,9 +2,8 @@
 // Purpose: Locked shell shown before app access when Remodex Pro is required.
 // Layer: View
 // Exports: SubscriptionGateView
-// Depends on: StoreKit, SwiftUI, SubscriptionService, RevenueCatPaywallView
+// Depends on: SwiftUI, SubscriptionService, RevenueCatPaywallView
 
-import StoreKit
 import SwiftUI
 
 private struct SubscriptionGateFeature: Identifiable {
@@ -37,7 +36,6 @@ struct SubscriptionGateView: View {
     @Environment(SubscriptionService.self) private var subscriptions
 
     @State private var isPresentingPaywall = false
-    @State private var isPresentingOfferCodeRedemption = false
 
     private let previewPlans: [SubscriptionGatePreviewPlan]?
     private let previewIsLoading: Bool
@@ -76,9 +74,6 @@ struct SubscriptionGateView: View {
         .fullScreenCover(isPresented: $isPresentingPaywall) {
             RevenueCatPaywallView()
         }
-        .offerCodeRedemption(isPresented: $isPresentingOfferCodeRedemption) { result in
-            handleOfferCodeRedemptionCompletion(result)
-        }
     }
 
     private var hero: some View {
@@ -99,7 +94,7 @@ struct SubscriptionGateView: View {
                     .foregroundStyle(primaryTextColor)
                     .multilineTextAlignment(.center)
 
-                Text("Unlock monthly, yearly, or lifetime access to connect your iPhone to Codex running on your computer.")
+                Text("Unlock monthly, yearly, or lifetime access to connect your iPhone to Codex running on your Mac.")
                     .font(AppFont.caption())
                     .foregroundStyle(secondaryTextColor)
                     .multilineTextAlignment(.center)
@@ -320,13 +315,6 @@ struct SubscriptionGateView: View {
 
                 Text(" · ").foregroundStyle(secondaryTextColor)
 
-                Button("Redeem Code") {
-                    isPresentingOfferCodeRedemption = true
-                }
-                .disabled(isPurchasing || isRestoring)
-
-                Text(" · ").foregroundStyle(secondaryTextColor)
-
                 Button("Privacy") {
                     UIApplication.shared.open(AppEnvironment.privacyPolicyURL)
                 }
@@ -341,7 +329,7 @@ struct SubscriptionGateView: View {
             .foregroundStyle(secondaryTextColor)
 
             if let error = errorMessage, !error.isEmpty {
-                Text(error)
+                Text(localizedAppMessage(error))
                     .font(AppFont.caption())
                     .foregroundStyle(.red.opacity(0.9))
                     .multilineTextAlignment(.center)
@@ -449,20 +437,6 @@ struct SubscriptionGateView: View {
     private var ctaForegroundColor: Color {
         colorScheme == .dark ? .black : .white
     }
-
-    private func handleOfferCodeRedemptionCompletion(_ result: Result<Void, any Error>) {
-        guard !isPreviewMode else {
-            return
-        }
-
-        Task {
-            if case .failure = result {
-                await subscriptions.refreshCustomerInfoSilently()
-            } else {
-                await subscriptions.syncPurchasesAfterOfferCodeRedemption()
-            }
-        }
-    }
 }
 
 struct SubscriptionBootstrapFailureView: View {
@@ -500,7 +474,7 @@ struct SubscriptionBootstrapFailureView: View {
                     }
 
                     if let error = subscriptions.lastErrorMessage, !error.isEmpty {
-                        Text(error)
+                        Text(localizedAppMessage(error))
                             .font(AppFont.caption())
                             .foregroundStyle(.red.opacity(0.9))
                             .multilineTextAlignment(.center)
@@ -590,19 +564,19 @@ private struct SubscriptionMacLoginInfoSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    Text("Remodex connects to Codex running on your computer. Buying Pro unlocks the app, but you still need Codex already logged in on that computer.")
+                    Text("Remodex connects to Codex running on your Mac. Buying Pro unlocks the app, but you still need Codex already logged in on the Mac side.")
                         .font(AppFont.body())
 
                     infoStep(
                         number: 1,
-                        title: "Open Codex on your computer",
-                        body: "Use the Codex desktop app or the Codex CLI on the computer you want to pair."
+                        title: "Open Codex on your Mac",
+                        body: "Use the Codex desktop app or the Codex CLI on the Mac you want to pair."
                     )
 
                     infoStep(
                         number: 2,
                         title: "Log in there first",
-                        body: "Finish the account login flow on the computer before pairing from iPhone."
+                        body: "Finish the account login flow on the Mac before pairing from iPhone."
                     )
 
                     infoStep(
@@ -613,7 +587,7 @@ private struct SubscriptionMacLoginInfoSheet: View {
                 }
                 .padding(20)
             }
-            .navigationTitle("Use with Your Computer")
+            .navigationTitle("Use with Your Mac")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

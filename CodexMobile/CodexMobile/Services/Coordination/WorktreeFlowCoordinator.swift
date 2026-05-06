@@ -18,6 +18,7 @@ enum WorktreeFlowHandoffOutcome: Sendable {
     case missingAssociatedWorktree
 }
 
+@MainActor
 enum WorktreeFlowCoordinator {
     private static let forkReadinessRetryDelays: [UInt64] = [
         0,

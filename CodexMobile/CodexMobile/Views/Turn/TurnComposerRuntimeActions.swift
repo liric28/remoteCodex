@@ -12,12 +12,29 @@ struct TurnComposerRuntimeActions {
     let selectReasoning: (String) -> Void
     let selectServiceTier: (CodexServiceTier?) -> Void
 
+    @MainActor
     static func resolve(codex: CodexService) -> TurnComposerRuntimeActions {
         TurnComposerRuntimeActions(
-            selectModel: codex.setSelectedModelId,
-            selectAutomaticReasoning: { codex.setSelectedReasoningEffort(nil) },
-            selectReasoning: { effort in codex.setSelectedReasoningEffort(effort) },
-            selectServiceTier: codex.setSelectedServiceTier
+            selectModel: { modelId in
+                Task { @MainActor in
+                    codex.setSelectedModelId(modelId)
+                }
+            },
+            selectAutomaticReasoning: {
+                Task { @MainActor in
+                    codex.setSelectedReasoningEffort(nil)
+                }
+            },
+            selectReasoning: { effort in
+                Task { @MainActor in
+                    codex.setSelectedReasoningEffort(effort)
+                }
+            },
+            selectServiceTier: { serviceTier in
+                Task { @MainActor in
+                    codex.setSelectedServiceTier(serviceTier)
+                }
+            }
         )
     }
 }

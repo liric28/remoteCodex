@@ -7,7 +7,7 @@
 //   FileChangeBlockPresentationBuilder, PerFileDiffChunk, PerFileDiffParser, PerFileDiffChunkCache,
 //   CodeCommentDirectiveContentCache, FileChangeGroupingCache
 // Depends on: Foundation, CodexMessage, TurnMessageRegexCache, TurnFileChangeSummaryParser,
-//   TurnDiffLineKind, MarkdownRenderProfile, TurnMermaidRenderer, CommandExecutionViews
+//   TurnDiffLineKind, MarkdownRenderProfile, TurnMermaidRenderer
 
 import Foundation
 
@@ -20,7 +20,6 @@ enum TurnCacheManager {
         MessageRowRenderModelCache.reset()
         CommandExecutionStatusCache.reset()
         FileChangeSystemRenderCache.reset()
-        FileChangeBlockPresentationCache.reset()
         PerFileDiffChunkCache.reset()
         CodeCommentDirectiveContentCache.reset()
         ThinkingDisclosureContentCache.reset()
@@ -36,7 +35,6 @@ final class BoundedCache<Key: Hashable, Value> {
     private let maxEntries: Int
     private let lock = NSLock()
     private var storage: [Key: Value] = [:]
-    private var accessOrder: [Key] = []
 
     init(maxEntries: Int) {
         self.maxEntries = maxEntries
@@ -45,23 +43,19 @@ final class BoundedCache<Key: Hashable, Value> {
     func get(_ key: Key) -> Value? {
         lock.lock()
         defer { lock.unlock() }
-        guard let value = storage[key] else { return nil }
-        markRecentlyUsed(key)
-        return value
+        return storage[key]
     }
 
     func set(_ key: Key, value: Value) {
         lock.lock()
         evictIfNeeded()
         storage[key] = value
-        markRecentlyUsed(key)
         lock.unlock()
     }
 
     func getOrSet(_ key: Key, builder: () -> Value) -> Value {
         lock.lock()
         if let cached = storage[key] {
-            markRecentlyUsed(key)
             lock.unlock()
             return cached
         }
@@ -72,7 +66,6 @@ final class BoundedCache<Key: Hashable, Value> {
         lock.lock()
         evictIfNeeded()
         storage[key] = built
-        markRecentlyUsed(key)
         lock.unlock()
 
         return built
@@ -81,25 +74,15 @@ final class BoundedCache<Key: Hashable, Value> {
     func removeAll() {
         lock.lock()
         storage.removeAll(keepingCapacity: false)
-        accessOrder.removeAll(keepingCapacity: false)
         lock.unlock()
     }
 
     private func evictIfNeeded() {
         guard storage.count >= maxEntries else { return }
         let evictCount = maxEntries / 2
-        let keysToRemove = Array(accessOrder.prefix(evictCount))
+        let keysToRemove = Array(storage.keys.prefix(evictCount))
         for key in keysToRemove {
             storage.removeValue(forKey: key)
-        }
-        accessOrder.removeFirst(min(evictCount, accessOrder.count))
-    }
-
-    private func markRecentlyUsed(_ key: Key) {
-        accessOrder.removeAll { $0 == key }
-        accessOrder.append(key)
-        if accessOrder.count > maxEntries * 2 {
-            accessOrder = accessOrder.filter { storage[$0] != nil }
         }
     }
 }
@@ -128,20 +111,6 @@ enum TurnTextCacheKey {
 
     static func key(namespace: String, text: String) -> String {
         "\(namespace)|\(fingerprint(for: text))"
-    }
-
-    static func stableFingerprint(for text: String) -> String {
-        let byteCount = text.utf8.count
-        var hash: UInt64 = 14_695_981_039_346_656_037
-        for byte in text.utf8 {
-            hash ^= UInt64(byte)
-            hash &*= 1_099_511_628_211
-        }
-        return "\(byteCount)|\(String(hash, radix: 16))"
-    }
-
-    static func stableKey(namespace: String, text: String) -> String {
-        "\(namespace)|\(stableFingerprint(for: text))"
     }
 
     static func entriesFingerprint(_ entries: [TurnFileChangeSummaryEntry]) -> String {
@@ -188,7 +157,7 @@ enum MarkdownRenderableTextCache {
         profile: MarkdownRenderProfile,
         builder: () -> String
     ) -> String {
-        let key = TurnTextCacheKey.stableKey(namespace: profile.cacheKey, text: raw)
+        let key = TurnTextCacheKey.key(namespace: profile.cacheKey, text: raw)
         return cache.getOrSet(key, builder: builder)
     }
 
@@ -206,9 +175,6 @@ struct FileChangeRenderState {
 struct MessageRowRenderModel {
     let codeCommentContent: CodeCommentDirectiveContent?
     let mermaidContent: MermaidMarkdownContent?
-    let assistantImageReferences: [AssistantMarkdownImageReference]
-    let assistantInlineContentSegments: [AssistantMarkdownContentSegment]
-    let assistantTextWithoutImageSyntax: String?
     let fileChangeState: FileChangeRenderState?
     let fileChangeGroups: [FileChangeGroup]
     let thinkingContent: ThinkingDisclosureContent?
@@ -219,9 +185,6 @@ struct MessageRowRenderModel {
     static let empty = MessageRowRenderModel(
         codeCommentContent: nil,
         mermaidContent: nil,
-        assistantImageReferences: [],
-        assistantInlineContentSegments: [],
-        assistantTextWithoutImageSyntax: nil,
         fileChangeState: nil,
         fileChangeGroups: [],
         thinkingContent: nil,
@@ -235,10 +198,7 @@ enum MessageRowRenderModelCache {
     private static let cache = BoundedCache<String, MessageRowRenderModel>(maxEntries: 512)
 
     static func model(for message: CodexMessage, displayText: String) -> MessageRowRenderModel {
-        let textFingerprint = message.isStreaming
-            ? TurnTextCacheKey.fingerprint(for: displayText)
-            : TurnTextCacheKey.stableFingerprint(for: displayText)
-        let key = "\(message.id)|\(message.kind.rawValue)|\(message.role.rawValue)|\(message.isStreaming)|\(textFingerprint)"
+        let key = "\(message.id)|\(message.kind.rawValue)|\(message.role.rawValue)|\(message.isStreaming)|\(TurnTextCacheKey.fingerprint(for: displayText))"
         return cache.getOrSet(key) { buildModel(for: message, displayText: displayText) }
     }
 
@@ -249,31 +209,16 @@ enum MessageRowRenderModelCache {
     private static func buildModel(for message: CodexMessage, displayText: String) -> MessageRowRenderModel {
         switch message.role {
         case .assistant:
-            let assistantImageReferences = message.isStreaming
-                ? []
-                : AssistantMarkdownImageReferenceParser.references(in: displayText)
-            let assistantTextWithoutImageSyntax = assistantImageReferences.isEmpty
-                ? nil
-                : AssistantMarkdownImageReferenceParser.visibleTextRemovingImageSyntax(from: displayText)
-            let assistantInlineContentSegments = assistantImageReferences.contains(where: \.isTemporaryScreenshotImage)
-                ? AssistantMarkdownImageReferenceParser.contentSegmentsPreservingTemporaryImages(from: displayText)
-                : []
-            let assistantRenderText = assistantTextWithoutImageSyntax ?? displayText
             // Defer Mermaid parsing until the assistant row is finalized so streaming deltas
-            // keep the lightweight append-only path and avoid repeated parser/WebKit churn.
+            // keep the lightweight markdown path and avoid repeated WebKit churn.
             return MessageRowRenderModel(
-                codeCommentContent: message.isStreaming
-                    ? nil
-                    : CodeCommentDirectiveContentCache.content(messageID: message.id, text: displayText),
+                codeCommentContent: CodeCommentDirectiveContentCache.content(messageID: message.id, text: displayText),
                 mermaidContent: message.isStreaming
                     ? nil
                     : MermaidMarkdownContentCache.content(
                         messageID: message.id,
-                        text: assistantRenderText
-                ),
-                assistantImageReferences: assistantImageReferences,
-                assistantInlineContentSegments: assistantInlineContentSegments,
-                assistantTextWithoutImageSyntax: assistantTextWithoutImageSyntax,
+                        text: displayText
+                    ),
                 fileChangeState: nil,
                 fileChangeGroups: [],
                 thinkingContent: nil,
@@ -293,9 +238,6 @@ enum MessageRowRenderModelCache {
                 return MessageRowRenderModel(
                     codeCommentContent: nil,
                     mermaidContent: nil,
-                    assistantImageReferences: [],
-                    assistantInlineContentSegments: [],
-                    assistantTextWithoutImageSyntax: nil,
                     fileChangeState: nil,
                     fileChangeGroups: [],
                     thinkingContent: thinkingText.isEmpty
@@ -315,9 +257,6 @@ enum MessageRowRenderModelCache {
                 return MessageRowRenderModel(
                     codeCommentContent: nil,
                     mermaidContent: nil,
-                    assistantImageReferences: [],
-                    assistantInlineContentSegments: [],
-                    assistantTextWithoutImageSyntax: nil,
                     fileChangeState: fileChangeState,
                     fileChangeGroups: FileChangeGroupingCache.grouped(messageID: message.id, entries: allEntries),
                     thinkingContent: nil,
@@ -331,9 +270,6 @@ enum MessageRowRenderModelCache {
                 return MessageRowRenderModel(
                     codeCommentContent: nil,
                     mermaidContent: nil,
-                    assistantImageReferences: [],
-                    assistantInlineContentSegments: [],
-                    assistantTextWithoutImageSyntax: nil,
                     fileChangeState: nil,
                     fileChangeGroups: [],
                     thinkingContent: nil,
@@ -412,7 +348,7 @@ private struct FileChangeBlockAggregate {
     var deletions: Int
     var action: TurnFileChangeAction?
     var diffSections: [String]
-    var totalsBySourceIndex: [Int: TurnDiffLineTotals]
+    var lastTotalsSourceIndex: Int
 }
 
 private struct RawFileChangeDiffSection {
@@ -423,8 +359,8 @@ private struct RawFileChangeDiffSection {
     let diffCode: String
 }
 
-// Builds one per-file diff model from raw file-change messages. Summary Totals
-// override same-message diff counts, then separate messages for the same file add up.
+// Builds one per-file diff model from raw file-change messages so Totals stay authoritative
+// while diff hunks remain purely visual context.
 enum FileChangeBlockPresentationBuilder {
     static func build(from messages: [CodexMessage]) -> FileChangeBlockPresentation? {
         guard !messages.isEmpty else {
@@ -496,11 +432,12 @@ enum FileChangeBlockPresentationBuilder {
             var updated = existing
             updated.path = FileChangePathIdentity.preferredDisplayPath(existing.path, entry.path)
             updated.action = mergedFileChangeAction(existing: existing.action, incoming: entry.action)
-            updated.totalsBySourceIndex[sourceIndex] = TurnDiffLineTotals(
-                additions: entry.additions,
-                deletions: entry.deletions
-            )
-            applyTotals(from: updated.totalsBySourceIndex, to: &updated)
+
+            if sourceIndex >= existing.lastTotalsSourceIndex {
+                updated.additions = entry.additions
+                updated.deletions = entry.deletions
+                updated.lastTotalsSourceIndex = sourceIndex
+            }
 
             aggregates[existingIndex] = updated
             return
@@ -513,12 +450,7 @@ enum FileChangeBlockPresentationBuilder {
                 deletions: entry.deletions,
                 action: entry.action,
                 diffSections: [],
-                totalsBySourceIndex: [
-                    sourceIndex: TurnDiffLineTotals(
-                        additions: entry.additions,
-                        deletions: entry.deletions
-                    ),
-                ]
+                lastTotalsSourceIndex: sourceIndex
             )
         )
     }
@@ -545,9 +477,14 @@ enum FileChangeBlockPresentationBuilder {
                 return
             }
 
-            existing.totalsBySourceIndex[sourceIndex, default: TurnDiffLineTotals()].additions += section.additions
-            existing.totalsBySourceIndex[sourceIndex, default: TurnDiffLineTotals()].deletions += section.deletions
-            applyTotals(from: existing.totalsBySourceIndex, to: &existing)
+            if existing.diffSections.isEmpty {
+                existing.additions = section.additions
+                existing.deletions = section.deletions
+            } else {
+                existing.additions += section.additions
+                existing.deletions += section.deletions
+            }
+            existing.lastTotalsSourceIndex = max(existing.lastTotalsSourceIndex, sourceIndex)
             existing.diffSections.append(normalizedDiff)
             aggregates[existingIndex] = existing
             return
@@ -560,22 +497,9 @@ enum FileChangeBlockPresentationBuilder {
                 deletions: section.deletions,
                 action: section.action,
                 diffSections: [normalizedDiff],
-                totalsBySourceIndex: [
-                    sourceIndex: TurnDiffLineTotals(
-                        additions: section.additions,
-                        deletions: section.deletions
-                    ),
-                ]
+                lastTotalsSourceIndex: sourceIndex
             )
         )
-    }
-
-    private static func applyTotals(
-        from totalsBySourceIndex: [Int: TurnDiffLineTotals],
-        to aggregate: inout FileChangeBlockAggregate
-    ) {
-        aggregate.additions = totalsBySourceIndex.values.reduce(0) { $0 + $1.additions }
-        aggregate.deletions = totalsBySourceIndex.values.reduce(0) { $0 + $1.deletions }
     }
 
     private static func mergedFileChangeAction(
@@ -600,24 +524,6 @@ enum FileChangeBlockPresentationBuilder {
         case (nil, nil):
             return nil
         }
-    }
-}
-
-enum FileChangeBlockPresentationCache {
-    private static let cache = BoundedCache<String, FileChangeBlockPresentation?>(maxEntries: 128)
-
-    static func presentation(from messages: [CodexMessage]) -> FileChangeBlockPresentation? {
-        guard !messages.isEmpty else { return nil }
-        let key = messages.map { message in
-            TurnTextCacheKey.key(messageID: message.id, kind: "block-file-change", text: message.text)
-        }.joined(separator: "||")
-        return cache.getOrSet(key) {
-            FileChangeBlockPresentationBuilder.build(from: messages)
-        }
-    }
-
-    static func reset() {
-        cache.removeAll()
     }
 }
 

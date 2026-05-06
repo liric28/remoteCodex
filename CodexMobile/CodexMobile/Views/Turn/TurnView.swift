@@ -18,6 +18,7 @@ struct TurnView: View {
     @Environment(\.reconnectAction) private var reconnectAction
     @Environment(\.wakeMacDisplayAction) private var wakeMacDisplayAction
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage(AppLanguage.storageKey) private var appLanguageRawValue = AppLanguage.system.rawValue
     @State private var viewModel = TurnViewModel()
     @State private var isInputFocused = false
     @State private var isShowingThreadPathSheet = false
@@ -54,11 +55,7 @@ struct TurnView: View {
         let gitWorkingDirectory = resolvedThread.gitWorkingDirectory
         let isThreadRunning = renderSnapshot.isThreadRunning
         let isEmptyThread = renderSnapshot.messages.isEmpty
-        let threadDisplayPhase = codex.threadDisplayPhase(
-            threadId: thread.id,
-            hasVisibleMessages: !renderSnapshot.messages.isEmpty,
-            isThreadRunning: isThreadRunning
-        )
+        let threadDisplayPhase = codex.threadDisplayPhase(threadId: thread.id)
         // Keep the service-owned loading vs empty-state decision intact while
         // history hydration catches up for previously active conversations.
         let resolvedEmptyConversationState = resolvedEmptyState(for: threadDisplayPhase)
@@ -77,12 +74,12 @@ struct TurnView: View {
         )
         let toolbarNavigationContext = threadNavigationContext(for: resolvedThread)
         let toolbarWorktreeHandoffTitle = isWorktreeProject ? "Hand off to Local" : "Hand off to Worktree"
-        let isGitActionEnabled = viewModel.gitRepoSync != nil && canRunGitAction(
+        let isGitActionEnabled = canRunGitAction(
             isThreadRunning: isThreadRunning,
             gitWorkingDirectory: gitWorkingDirectory
         )
-        let disabledGitActions: Set<TurnGitActionKind> = viewModel.disabledGitActions
-        let onTapMacHandoff: (() -> Void)? = codex.isConnected && codex.supportsDesktopAppHandoff ? {
+        let disabledGitActions: Set<TurnGitActionKind> = viewModel.canCreatePullRequest ? [] : [.createPR]
+        let onTapMacHandoff: (() -> Void)? = codex.isConnected ? {
             isShowingMacHandoffConfirm = true
         } : nil
         let onTapWorktreeHandoff: (() -> Void)? = showsGitControls ? {
@@ -108,26 +105,8 @@ struct TurnView: View {
                 planSessionSource: planSessionSource,
                 allowsAssistantPlanFallbackRecovery: planSessionSource == .compatibilityFallback,
                 threadMessagesForPlanMatching: renderSnapshot.planMatchingMessages,
-                currentWorkingDirectory: gitWorkingDirectory,
-                errorMessage: timelineFooterErrorMessage,
+                errorMessage: codex.lastErrorMessage,
                 composerRecoveryAccessory: composerRecoveryAccessory,
-                onReportError: { errorMessage in
-                    openURL(AppEnvironment.feedbackMailtoURL(
-                        errorMessage: errorMessage,
-                        threadId: thread.id,
-                        isConnected: codex.isConnected,
-                        cliVersion: codex.bridgeInstalledVersion
-                    ))
-                },
-                onDismissError: {
-                    codex.lastErrorMessage = nil
-                },
-                hasRemoteEarlierMessages: renderSnapshot.hasRemoteOlderHistory,
-                hasLocallyProjectedEarlierMessages: renderSnapshot.hasLocallyProjectedOlderHistory,
-                usesPaginatedHistory: renderSnapshot.usesPaginatedHistory,
-                initialTurnsLoaded: renderSnapshot.initialTurnsLoaded,
-                isLoadingRemoteEarlierMessages: renderSnapshot.isLoadingOlderHistory,
-                olderHistoryLoadErrorMessage: renderSnapshot.olderHistoryLoadErrorMessage,
                 shouldAnchorToAssistantResponse: shouldAnchorToAssistantResponseBinding,
                 isScrolledToBottom: isScrolledToBottomBinding,
                 isComposerFocused: isInputFocused,
@@ -158,26 +137,13 @@ struct TurnView: View {
                 onTapSubagent: { subagent in
                     openThread(subagent.threadId)
                 },
-                onRevealEarlierMessages: { pageSize in
-                    codex.noteThreadHistoryRevealRequested(threadId: thread.id, pageSize: pageSize)
-                },
-                onLoadRemoteEarlierMessages: {
-                    Task { @MainActor in
-                        await codex.loadOlderThreadHistoryPage(threadId: thread.id)
-                    }
-                },
-                onRetryEarlierMessages: { completion in
-                    Task { @MainActor in
-                        defer { completion() }
-                        _ = try? await codex.loadThreadHistoryIfNeeded(threadId: thread.id, forceRefresh: true)
-                    }
-                },
                 onTapOutsideComposer: {
                     guard isInputFocused else { return }
                     isInputFocused = false
                     viewModel.clearComposerAutocomplete()
                 }
             )
+        .id("turn-language-\(thread.id)-\(appLanguageRawValue)")
         .environment(\.inlineCommitAndPushAction, showsGitControls ? {
             viewModel.inlineCommitAndPush(
                 codex: codex,
@@ -204,7 +170,6 @@ struct TurnView: View {
                 isGitActionEnabled: isGitActionEnabled,
                 disabledGitActions: disabledGitActions,
                 isRunningGitAction: viewModel.isRunningGitAction,
-                gitActionLoadingTitle: viewModel.gitActionLoadingTitle,
                 showsDiscardRuntimeChangesAndSync: viewModel.shouldShowDiscardRuntimeChangesAndSync,
                 gitSyncState: viewModel.gitSyncState,
                 onTapMacHandoff: onTapMacHandoff,
@@ -222,11 +187,6 @@ struct TurnView: View {
             )
         }
         .overlay {
-            if isStartingSiblingChat {
-                NewChatOpeningOverlay()
-                    .transition(.opacity)
-            }
-
             if isShowingWorktreeHandoff {
                 TurnWorktreeHandoffOverlay(
                     mode: .handoff,
@@ -265,11 +225,6 @@ struct TurnView: View {
                 .transition(.opacity)
             }
         }
-        .overlay(alignment: .top) {
-            gitActionToastOverlay
-        }
-        .animation(.spring(response: 0.35, dampingFraction: 0.88), value: viewModel.gitActionLoadingTitle)
-        .animation(.spring(response: 0.35, dampingFraction: 0.88), value: viewModel.gitActionSuccess?.id)
         .fullScreenCover(isPresented: isCameraPresentedBinding) {
             CameraImagePicker { data in
                 viewModel.enqueueCapturedImageData(data, codex: codex)
@@ -352,6 +307,9 @@ struct TurnView: View {
         .onChange(of: isInputFocused) { _, isFocused in
             guard !isFocused else { return }
             viewModel.clearComposerAutocomplete()
+        }
+        .onChange(of: gitWorkingDirectory) { _, _ in
+            viewModel.clearStaleGitRepositoryErrorIfNeeded(codex: codex)
         }
         .onChange(of: renderSnapshot.repoRefreshSignal) { _, newValue in
             guard showsGitControls, newValue != nil else { return }
@@ -456,7 +414,7 @@ struct TurnView: View {
                 viewModel.dismissGitSyncAlert()
             },
             onConfirmMacHandoff: {
-                continueOnDesktopApp()
+                continueOnMac()
             }
         )
         .alert(
@@ -498,52 +456,6 @@ struct TurnView: View {
                 handleConnectionRecoveryAction()
             }
         )
-    }
-
-    // Keeps reconnect prompts out of the red footer error slot; recovery UI owns that state.
-    private var timelineFooterErrorMessage: String? {
-        guard let message = codex.lastErrorMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !message.isEmpty else {
-            return nil
-        }
-
-        if isConnectionRecoveryFooterNoise(message)
-            || isBackgroundHistoryRetryNoise(message)
-            || isUnmaterializedThreadFooterNoise(message)
-            || isCancellationFooterNoise(message) {
-            return nil
-        }
-
-        return message
-    }
-
-    private func isConnectionRecoveryFooterNoise(_ message: String) -> Bool {
-        let normalizedMessage = message.lowercased()
-        return normalizedMessage.contains("tap reconnect")
-            || normalizedMessage.hasPrefix("connection was interrupted")
-            || normalizedMessage.hasPrefix("connection timed out")
-            || normalizedMessage.hasPrefix("trying to reconnect")
-    }
-
-    private func isBackgroundHistoryRetryNoise(_ message: String) -> Bool {
-        message.lowercased() == "couldn't load this chat yet. retrying in the background."
-    }
-
-    private func isUnmaterializedThreadFooterNoise(_ message: String) -> Bool {
-        let normalizedMessage = message.lowercased()
-        return normalizedMessage.contains("not materialized")
-            || normalizedMessage.contains("not yet materialized")
-            || (
-                normalizedMessage.contains("thread/turns/list")
-                    && normalizedMessage.contains("unavailable")
-            )
-    }
-
-    private func isCancellationFooterNoise(_ message: String) -> Bool {
-        let normalizedMessage = message.lowercased()
-        return normalizedMessage.contains("cancellationerror")
-            || normalizedMessage.contains("cancelled")
-            || normalizedMessage.contains("canceled")
     }
 
     private var voiceRecoveryPresentation: VoiceRecoveryPresentation? {
@@ -657,7 +569,7 @@ struct TurnView: View {
         }
     }
 
-    private func continueOnDesktopApp() {
+    private func continueOnMac() {
         guard !isHandingOffToMac else { return }
         isHandingOffToMac = true
 
@@ -666,7 +578,7 @@ struct TurnView: View {
 
             do {
                 let handoffService = DesktopHandoffService(codex: codex)
-                try await handoffService.continueOnDesktopApp(threadId: thread.id)
+                try await handoffService.continueOnMac(threadId: thread.id)
             } catch {
                 macHandoffErrorMessage = error.localizedDescription
             }
@@ -684,98 +596,10 @@ struct TurnView: View {
             do {
                 _ = try await codex.startThreadIfReady(preferredProjectPath: resolvedProjectPathForFollowUpThread())
             } catch {
-                if let message = codex.userFacingTurnErrorMessageForFooter(from: error),
-                   codex.lastErrorMessage?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
-                    codex.lastErrorMessage = message
+                if codex.lastErrorMessage?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
+                    codex.lastErrorMessage = error.localizedDescription
                 }
             }
-        }
-    }
-
-    @ViewBuilder
-    private var gitActionToastOverlay: some View {
-        if let success = viewModel.gitActionSuccess {
-            InAppToastBannerView(
-                title: success.title,
-                subtitle: gitSuccessSubtitle(for: success),
-                accessibilityHint: gitSuccessAccessibilityHint(for: success),
-                isDismissable: true,
-                onTap: nil,
-                onDismiss: { viewModel.dismissGitActionSuccess() },
-                trailingAction: gitSuccessAction(for: success)
-            ) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(.white, Color.green)
-                    .symbolRenderingMode(.palette)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
-            .transition(.move(edge: .top).combined(with: .opacity))
-            .id(success.id)
-        } else if let progress = viewModel.gitActionProgress {
-            InAppToastBannerView(
-                title: progress.activeTitle,
-                subtitle: nil,
-                detailLines: gitProgressDetailLines(progress),
-                accessibilityHint: nil,
-                isDismissable: false,
-                onTap: nil,
-                onDismiss: nil
-            ) {
-                ProgressView()
-                    .controlSize(.regular)
-                    .tint(.primary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
-            .transition(.move(edge: .top).combined(with: .opacity))
-        }
-    }
-
-    private func gitProgressDetailLines(_ progress: TurnGitActionProgress) -> [String] {
-        guard progress.plannedPhases.count > 1 else { return [] }
-        return progress.plannedPhases.map { phase in
-            switch progress.status(for: phase) {
-            case .completed:
-                return "✓ \(phase.completedTitle)"
-            case .skipped:
-                return "– \(phase.completedTitle)"
-            case .active:
-                return "• \(phase.activeTitle)"
-            case .pending:
-                return "○ \(phase.pendingTitle)"
-            }
-        }
-    }
-
-    private func gitSuccessSubtitle(for success: TurnGitActionSuccess) -> String? {
-        guard let subtitle = success.subtitle?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !subtitle.isEmpty else {
-            return nil
-        }
-        return subtitle
-    }
-
-    private func gitSuccessAccessibilityHint(for success: TurnGitActionSuccess) -> String? {
-        switch success.kind {
-        case .pullRequest where success.pullRequestURL != nil:
-            return "Tap View PR to open the pull request."
-        default:
-            return nil
-        }
-    }
-
-    private func gitSuccessAction(for success: TurnGitActionSuccess) -> InAppToastBannerAction? {
-        switch success.kind {
-        case .pullRequest:
-            guard let url = success.pullRequestURL else { return nil }
-            return InAppToastBannerAction(title: "View PR") {
-                UIApplication.shared.open(url)
-                viewModel.dismissGitActionSuccess()
-            }
-        case .commit, .push:
-            return nil
         }
     }
 
@@ -888,7 +712,11 @@ struct TurnView: View {
 
     // Re-resolves the active thread so handoff/reconnect UI always uses the freshest cwd + title.
     private var currentResolvedThread: CodexThread {
-        codex.thread(for: thread.id) ?? thread
+        resolvedThread(withID: thread.id) ?? thread
+    }
+
+    private func resolvedThread(withID threadID: String) -> CodexThread? {
+        codex.threads.first(where: { $0.id == threadID })
     }
 
     // Reuses the same running-thread gate as Stop/Git actions so worktree handoff never races a live run.
@@ -896,7 +724,7 @@ struct TurnView: View {
         isThreadRunning: Bool,
         gitWorkingDirectory: String?
     ) -> Bool {
-        viewModel.isGitRepositoryInitialized && canRunGitAction(
+        canRunGitAction(
             isThreadRunning: isThreadRunning,
             gitWorkingDirectory: gitWorkingDirectory
         )
@@ -1197,9 +1025,8 @@ struct TurnView: View {
                 )
                 openThread(forkedThread.id)
             } catch {
-                if let message = codex.userFacingTurnErrorMessageForFooter(from: error),
-                   codex.lastErrorMessage?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
-                    codex.lastErrorMessage = message
+                if codex.lastErrorMessage?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
+                    codex.lastErrorMessage = error.localizedDescription
                 }
             }
         }
@@ -1271,9 +1098,8 @@ struct TurnView: View {
                 )
                 viewModel.clearComposerReviewSelection()
             } catch {
-                if let message = codex.userFacingTurnErrorMessageForFooter(from: error),
-                   codex.lastErrorMessage?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
-                    codex.lastErrorMessage = message
+                if codex.lastErrorMessage?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
+                    codex.lastErrorMessage = error.localizedDescription
                 }
             }
         }
@@ -1325,7 +1151,7 @@ struct TurnView: View {
 
     private var selectedModelTitle: String {
         guard let selectedModel = codex.selectedModelOption() else {
-            return "GPT-5.5"
+            return "Select model"
         }
 
         return TurnComposerMetaMapper.modelTitle(for: selectedModel)
@@ -1360,7 +1186,7 @@ struct TurnView: View {
             return nil
         }
 
-        return codex.thread(for: parentThreadId)
+        return resolvedThread(withID: parentThreadId)
     }
 
     private func threadNavigationContext(for thread: CodexThread) -> TurnThreadNavigationContext? {
@@ -1421,8 +1247,8 @@ struct TurnView: View {
                 orderedModelOptions: orderedModelOptions,
                 selectedModelTitle: selectedModelTitle,
                 reasoningDisplayOptions: reasoningDisplayOptions,
-                showsGitControls: showsGitControls && viewModel.isGitRepositoryInitialized,
-                isGitBranchSelectorEnabled: viewModel.isGitRepositoryInitialized && canRunGitAction(
+                showsGitControls: showsGitControls,
+                isGitBranchSelectorEnabled: canRunGitAction(
                     isThreadRunning: isThreadRunning,
                     gitWorkingDirectory: gitWorkingDirectory
                 ),
@@ -1476,7 +1302,7 @@ struct TurnView: View {
                     )
                 },
                 onRefreshGitBranches: {
-                    guard showsGitControls, viewModel.isGitRepositoryInitialized else { return }
+                    guard showsGitControls else { return }
                     viewModel.refreshGitBranchTargets(
                         codex: codex,
                         workingDirectory: gitWorkingDirectory,
@@ -1492,12 +1318,7 @@ struct TurnView: View {
                     handleWorktreeHandoffTap(currentThread: currentThread)
                 },
                 onOpenFeedbackMail: {
-                    openURL(AppEnvironment.feedbackMailtoURL(
-                        errorMessage: codex.lastErrorMessage,
-                        threadId: thread.id,
-                        isConnected: codex.isConnected,
-                        cliVersion: codex.bridgeInstalledVersion
-                    ))
+                    openURL(AppEnvironment.feedbackMailtoURL)
                 },
                 onShowStatus: presentStatusSheet,
                 voiceButtonPresentation: voiceButtonPresentation,
@@ -1697,7 +1518,7 @@ struct TurnView: View {
                 snapshot: ConnectionRecoverySnapshot(
                     title: "Voice Mode",
                     summary: "Reconnect to your Mac to use voice mode.",
-                    detail: "Keep the Remodex bridge running on your paired computer, then try the microphone again.",
+                    detail: "Keep the Remodex bridge running on your Mac, then try the microphone again.",
                     status: .interrupted,
                     trailingStyle: .action("Reconnect")
                 ),
@@ -1708,7 +1529,7 @@ struct TurnView: View {
                 snapshot: ConnectionRecoverySnapshot(
                     title: "Voice Mode",
                     summary: "This bridge session does not support voice mode yet.",
-                    detail: "Restart Remodex on your computer, then reconnect this iPhone. If it still happens, update Remodex on your computer and pair again.",
+                    detail: "Restart Remodex on your Mac, then reconnect this iPhone. If it still happens, update Remodex on your Mac and pair again.",
                     status: .actionRequired,
                     trailingStyle: .action("Reconnect")
                 ),
@@ -1718,8 +1539,8 @@ struct TurnView: View {
             return VoiceRecoveryPresentation(
                 snapshot: ConnectionRecoverySnapshot(
                     title: "Voice Mode",
-                    summary: "Sign in to ChatGPT on your computer to use voice mode.",
-                    detail: "Open ChatGPT on the paired computer, sign in there, then come back here and try again.",
+                    summary: "Sign in to ChatGPT on your Mac to use voice mode.",
+                    detail: "Open ChatGPT on the paired Mac, sign in there, then come back here and try again.",
                     status: .actionRequired,
                     trailingStyle: .action("How To Fix")
                 ),
@@ -1729,8 +1550,8 @@ struct TurnView: View {
             return VoiceRecoveryPresentation(
                 snapshot: ConnectionRecoverySnapshot(
                     title: "Voice Mode",
-                    summary: "ChatGPT voice needs a fresh sign-in on your computer.",
-                    detail: "Open ChatGPT on the paired computer, sign in again there, then retry voice mode here.",
+                    summary: "ChatGPT voice needs a fresh sign-in on your Mac.",
+                    detail: "Open ChatGPT on the paired Mac, sign in again there, then retry voice mode here.",
                     status: .actionRequired,
                     trailingStyle: .action("How To Fix")
                 ),
@@ -1751,8 +1572,8 @@ struct TurnView: View {
             return VoiceRecoveryPresentation(
                 snapshot: ConnectionRecoverySnapshot(
                     title: "Voice Mode",
-                    summary: "Voice mode needs a ChatGPT session on your computer.",
-                    detail: "API-key-only auth is not enough here. Sign in to ChatGPT on the paired computer, then try again.",
+                    summary: "Voice mode needs a ChatGPT session on your Mac.",
+                    detail: "API-key-only auth is not enough here. Sign in to ChatGPT on the paired Mac, then try again.",
                     status: .actionRequired,
                     trailingStyle: .action("How To Fix")
                 ),
@@ -1869,7 +1690,7 @@ struct TurnView: View {
 
     private var loadingState: some View {
         chatPlaceholderState(
-            title: Text("Loading chat..."),
+            title: "Loading chat...",
             subtitle: "Fetching the latest messages for this conversation."
         )
     }
@@ -1885,27 +1706,12 @@ struct TurnView: View {
 
     private var emptyState: some View {
         chatPlaceholderState(
-            title: emptyStateTitle,
+            title: "Hi! How can I help you?",
             subtitle: "Chats are End-to-end encrypted"
         )
     }
 
-    private var emptyStateTitle: Text {
-        guard let folder = emptyStateFolderName else {
-            return Text("Hi! How can I help you?")
-        }
-        return Text("What should we do in ")
-            + Text(folder).foregroundStyle(.secondary)
-            + Text("?")
-    }
-
-    private var emptyStateFolderName: String? {
-        guard let cwd = currentResolvedThread.gitWorkingDirectory else { return nil }
-        let component = (cwd as NSString).lastPathComponent
-        return component.isEmpty ? nil : component
-    }
-
-    private func chatPlaceholderState(title: Text, subtitle: String) -> some View {
+    private func chatPlaceholderState(title: String, subtitle: String) -> some View {
         VStack(spacing: 12) {
             Spacer()
             Image("AppLogo")
@@ -1914,10 +1720,8 @@ struct TurnView: View {
                 .frame(width: 56, height: 56)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .adaptiveGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            title
-                .font(AppFont.title2(weight: .regular))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 28)
+            Text(title)
+                .font(AppFont.title2(weight: .semibold))
             Text(subtitle)
                 .font(AppFont.caption())
                 .foregroundStyle(.secondary)
@@ -1927,27 +1731,6 @@ struct TurnView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
-    }
-}
-
-private struct NewChatOpeningOverlay: View {
-    var body: some View {
-        VStack(spacing: 14) {
-            ProgressView()
-                .controlSize(.regular)
-
-            VStack(spacing: 4) {
-                Text("Starting new chat...")
-                    .font(AppFont.headline())
-                    .foregroundStyle(.primary)
-
-                Text("Preparing an empty conversation.")
-                    .font(AppFont.caption())
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
     }
 }
 

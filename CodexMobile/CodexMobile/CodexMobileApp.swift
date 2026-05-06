@@ -12,17 +12,14 @@ struct CodexMobileApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @UIApplicationDelegateAdaptor(CodexMobileAppDelegate.self) private var appDelegate
     @State private var codexService: CodexService
-    @State private var petCompanionStore: PetCompanionStore
-    @State private var petCompanionStatusStore: PetCompanionStatusStore
     @State private var subscriptionService: SubscriptionService
+    @AppStorage(AppLanguage.storageKey) private var appLanguageRawValue = AppLanguage.system.rawValue
 
     init() {
         Self.configureRevenueCatIfAvailable()
         let service = CodexService()
         service.configureNotifications()
         _codexService = State(initialValue: service)
-        _petCompanionStore = State(initialValue: PetCompanionStore())
-        _petCompanionStatusStore = State(initialValue: PetCompanionStatusStore())
         _subscriptionService = State(initialValue: SubscriptionService())
     }
 
@@ -30,9 +27,8 @@ struct CodexMobileApp: App {
         WindowGroup {
             ContentView()
                 .environment(codexService)
-                .environment(petCompanionStore)
-                .environment(petCompanionStatusStore)
                 .environment(subscriptionService)
+                .environment(\.locale, appLanguage.locale)
                 .task {
                     await subscriptionService.bootstrap()
                 }
@@ -56,6 +52,10 @@ struct CodexMobileApp: App {
                     TurnCacheManager.resetAll()
                 }
         }
+    }
+
+    private var appLanguage: AppLanguage {
+        AppLanguage(rawValue: appLanguageRawValue) ?? .system
     }
 
     // Configures RevenueCat once at launch using the client-safe public SDK key.

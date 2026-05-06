@@ -1,7 +1,7 @@
 // FILE: GitActionModels.swift
 // Purpose: Data models for git operations executed via the phodex-bridge.
 // Layer: Model
-// Exports: GitDiffTotals, GitRepoSyncResult, GitPushResult, GitStackedActionResult, TurnGitActionKind, TurnGitSyncAlert
+// Exports: GitDiffTotals, GitChangedFile, GitRepoSyncResult, GitRepoDiffResult, GitCommitResult, GitPushResult, GitBranchesResult, GitCreateBranchResult, GitCreateWorktreeResult, GitCreateManagedWorktreeResult, GitManagedHandoffTransferResult, GitCheckoutResult, GitPullResult, GitResetResult, TurnGitActionKind, TurnGitSyncAlert, TurnGitSyncAlertButton, TurnGitSyncAlertAction
 // Depends on: JSONValue
 
 import Foundation
@@ -73,13 +73,10 @@ struct GitChangedFile: Equatable, Sendable {
 }
 
 struct GitRepoSyncResult: Sendable {
-    let isGitRepository: Bool
     let repoRoot: String?
     let currentBranch: String?
     let trackingBranch: String?
     let isDirty: Bool
-    let hasHeadCommit: Bool
-    let hasPushRemote: Bool
     let aheadCount: Int
     let behindCount: Int
     let localOnlyCommitCount: Int
@@ -90,13 +87,10 @@ struct GitRepoSyncResult: Sendable {
     let repoDiffTotals: GitDiffTotals?
 
     init(from json: [String: JSONValue]) {
-        self.isGitRepository = json["isRepo"]?.boolValue ?? true
         self.repoRoot = json["repoRoot"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.currentBranch = json["branch"]?.stringValue
         self.trackingBranch = json["tracking"]?.stringValue
         self.isDirty = json["dirty"]?.boolValue ?? false
-        self.hasHeadCommit = json["hasHeadCommit"]?.boolValue ?? true
-        self.hasPushRemote = json["hasPushRemote"]?.boolValue ?? true
         self.aheadCount = json["ahead"]?.intValue ?? 0
         self.behindCount = json["behind"]?.intValue ?? 0
         self.localOnlyCommitCount = json["localOnlyCommitCount"]?.intValue ?? 0
@@ -108,18 +102,6 @@ struct GitRepoSyncResult: Sendable {
             return GitChangedFile(from: object)
         } ?? []
         self.repoDiffTotals = GitDiffTotals(from: json["diff"]?.objectValue)
-    }
-}
-
-struct GitInitResult: Sendable {
-    let status: GitRepoSyncResult?
-
-    init(from json: [String: JSONValue]) {
-        if let statusObj = json["status"]?.objectValue {
-            self.status = GitRepoSyncResult(from: statusObj)
-        } else {
-            self.status = nil
-        }
     }
 }
 
@@ -140,18 +122,6 @@ struct GitCommitResult: Sendable {
         self.commitHash = json["hash"]?.stringValue ?? ""
         self.branch = json["branch"]?.stringValue ?? ""
         self.summary = json["summary"]?.stringValue ?? ""
-    }
-}
-
-struct GitGeneratedCommitMessageResult: Sendable {
-    let subject: String
-    let body: String
-    let fullMessage: String
-
-    init(from json: [String: JSONValue]) {
-        self.subject = json["subject"]?.stringValue ?? ""
-        self.body = json["body"]?.stringValue ?? ""
-        self.fullMessage = json["fullMessage"]?.stringValue ?? ""
     }
 }
 
@@ -299,57 +269,6 @@ struct GitRemoteUrlResult: Sendable {
     }
 }
 
-struct GitPullRequestDraftResult: Sendable {
-    let title: String
-    let body: String
-
-    init(from json: [String: JSONValue]) {
-        self.title = json["title"]?.stringValue ?? ""
-        self.body = json["body"]?.stringValue ?? ""
-    }
-}
-
-struct GitPullRequestResult: Sendable {
-    let status: String
-    let url: String?
-    let number: Int?
-    let baseBranch: String?
-    let headBranch: String?
-    let title: String?
-
-    init(from json: [String: JSONValue]?) {
-        self.status = json?["status"]?.stringValue ?? "skipped_not_requested"
-        self.url = json?["url"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.number = json?["number"]?.intValue
-        self.baseBranch = json?["baseBranch"]?.stringValue
-        self.headBranch = json?["headBranch"]?.stringValue
-        self.title = json?["title"]?.stringValue
-    }
-}
-
-struct GitStackedActionResult: Sendable {
-    let action: String
-    let push: GitPushResult?
-    let pullRequest: GitPullRequestResult
-    let status: GitRepoSyncResult?
-
-    init(from json: [String: JSONValue]) {
-        self.action = json["action"]?.stringValue ?? ""
-        if let pushObj = json["push"]?.objectValue,
-           pushObj["state"]?.stringValue == "pushed" || pushObj["branch"]?.stringValue != nil {
-            self.push = GitPushResult(from: pushObj)
-        } else {
-            self.push = nil
-        }
-        self.pullRequest = GitPullRequestResult(from: json["pr"]?.objectValue)
-        if let statusObj = json["status"]?.objectValue {
-            self.status = GitRepoSyncResult(from: statusObj)
-        } else {
-            self.status = nil
-        }
-    }
-}
-
 struct GitBranchesWithStatusResult: Sendable {
     let branches: [String]
     let branchesCheckedOutElsewhere: Set<String>
@@ -396,188 +315,28 @@ private extension GitBranchesWithStatusResult {
 // MARK: - Action kind
 
 enum TurnGitActionKind: CaseIterable, Sendable {
-    case initialize
     case syncNow
+    case pull
     case commit
     case push
     case commitAndPush
-    case commitPushCreatePR
     case createPR
     case discardRuntimeChangesAndSync
 
     var title: String {
         switch self {
-        case .initialize: return "Initialize Git"
         case .syncNow: return "Update"
+        case .pull: return "Pull"
         case .commit: return "Commit"
         case .push: return "Push"
         case .commitAndPush: return "Commit & Push"
-        case .commitPushCreatePR: return "Commit, Push & PR"
         case .createPR: return "Create PR"
         case .discardRuntimeChangesAndSync: return "Discard Local Changes"
         }
     }
-
-    var stackedActionIdentifier: String? {
-        switch self {
-        case .commit: return "commit"
-        case .push: return "push"
-        case .commitAndPush: return "commit_push"
-        case .commitPushCreatePR: return "commit_push_pr"
-        case .createPR: return "create_pr"
-        case .initialize, .syncNow, .discardRuntimeChangesAndSync:
-            return nil
-        }
-    }
-
-    // Phases drive the toast title and checklist. Stacked actions emit live progress
-    // events from the bridge; non-stacked actions advance phases manually from the view model.
-    func plannedPhases(
-        repoSync: GitRepoSyncResult?,
-        hasCustomCommitMessage: Bool,
-        willCreateFeatureBranch: Bool,
-        hasWorkingTreeChanges: Bool? = nil
-    ) -> [TurnGitActionPhase] {
-        let branchPhases: [TurnGitActionPhase] = willCreateFeatureBranch ? [.branch] : []
-        let shouldIncludeCommitPhases = hasWorkingTreeChanges ?? true
-        let commitPhases: [TurnGitActionPhase] = hasCustomCommitMessage
-            ? [.commit]
-            : [.generatingCommit, .commit]
-
-        switch self {
-        case .initialize, .syncNow, .discardRuntimeChangesAndSync:
-            return []
-        case .commit:
-            return branchPhases + commitPhases
-        case .push:
-            return [.push]
-        case .commitAndPush:
-            return branchPhases + (shouldIncludeCommitPhases ? commitPhases : []) + [.push]
-        case .commitPushCreatePR:
-            return branchPhases + (shouldIncludeCommitPhases ? commitPhases : []) + [.push, .createPR]
-        case .createPR:
-            let needsPush = repoSync.map { !$0.isDirty && (!$0.isPublishedToRemote || $0.aheadCount > 0 || $0.trackingBranch == nil) } ?? false
-            return (needsPush ? [.push] : []) + [.createPR]
-        }
-    }
-
-    // Single-step actions that don't run through the stacked action pipeline.
-    var standaloneTitle: String? {
-        switch self {
-        case .initialize:
-            return "Initializing Git..."
-        case .syncNow:
-            return "Updating..."
-        case .discardRuntimeChangesAndSync:
-            return "Discarding changes..."
-        default:
-            return nil
-        }
-    }
 }
 
-enum TurnGitActionPhase: String, CaseIterable, Sendable {
-    case branch
-    case generatingCommit
-    case commit
-    case push
-    case createPR
-
-    var activeTitle: String {
-        switch self {
-        case .branch: return "Preparing feature branch..."
-        case .generatingCommit: return "Generating commit message..."
-        case .commit: return "Committing..."
-        case .push: return "Pushing..."
-        case .createPR: return "Creating PR..."
-        }
-    }
-
-    var pendingTitle: String {
-        switch self {
-        case .branch: return "Prepare feature branch"
-        case .generatingCommit: return "Generate commit message"
-        case .commit: return "Commit"
-        case .push: return "Push"
-        case .createPR: return "Create PR"
-        }
-    }
-
-    var completedTitle: String {
-        switch self {
-        case .branch: return "Feature branch ready"
-        case .generatingCommit: return "Commit message ready"
-        case .commit: return "Committed"
-        case .push: return "Pushed"
-        case .createPR: return "PR created"
-        }
-    }
-
-    // Maps the bridge `git/stackedAction/progress` `phase` field to a Swift case.
-    init?(bridgePhase: String) {
-        switch bridgePhase {
-        case "branch": self = .branch
-        case "commit": self = .commit
-        case "push": self = .push
-        case "createPR": self = .createPR
-        default: return nil
-        }
-    }
-}
-
-enum TurnGitActionPhaseStatus: String, Sendable {
-    case started
-    case completed
-    case skipped
-}
-
-struct TurnGitActionProgress: Equatable, Sendable {
-    let action: TurnGitActionKind
-    let plannedPhases: [TurnGitActionPhase]
-    var currentPhase: TurnGitActionPhase?
-    var completedPhases: Set<TurnGitActionPhase>
-    var skippedPhases: Set<TurnGitActionPhase>
-
-    init(
-        action: TurnGitActionKind,
-        plannedPhases: [TurnGitActionPhase],
-        currentPhase: TurnGitActionPhase? = nil,
-        completedPhases: Set<TurnGitActionPhase> = [],
-        skippedPhases: Set<TurnGitActionPhase> = []
-    ) {
-        self.action = action
-        self.plannedPhases = plannedPhases
-        self.currentPhase = currentPhase
-        self.completedPhases = completedPhases
-        self.skippedPhases = skippedPhases
-    }
-
-    var activeTitle: String {
-        if let currentPhase {
-            return currentPhase.activeTitle
-        }
-        if let firstPending = plannedPhases.first(where: { !completedPhases.contains($0) && !skippedPhases.contains($0) }) {
-            return firstPending.activeTitle
-        }
-        return action.title
-    }
-
-    func status(for phase: TurnGitActionPhase) -> PhaseDisplayStatus {
-        if completedPhases.contains(phase) { return .completed }
-        if skippedPhases.contains(phase) { return .skipped }
-        if currentPhase == phase { return .active }
-        return .pending
-    }
-
-    enum PhaseDisplayStatus {
-        case pending
-        case active
-        case completed
-        case skipped
-    }
-}
-
-enum InlineCommitAndPushPhase: Equatable, Sendable {
+enum InlineCommitAndPushPhase: Sendable {
     case committing
     case pushing
 
@@ -588,26 +347,6 @@ enum InlineCommitAndPushPhase: Equatable, Sendable {
         case .pushing:
             return "Pushing..."
         }
-    }
-}
-
-struct TurnGitActionSuccess: Identifiable, Equatable, Sendable {
-    enum Kind: Equatable, Sendable {
-        case commit
-        case push
-        case pullRequest(url: String?)
-    }
-
-    let id = UUID()
-    let kind: Kind
-    let title: String
-    let subtitle: String?
-
-    var pullRequestURL: URL? {
-        if case .pullRequest(let url) = kind, let url, let parsed = URL(string: url) {
-            return parsed
-        }
-        return nil
     }
 }
 

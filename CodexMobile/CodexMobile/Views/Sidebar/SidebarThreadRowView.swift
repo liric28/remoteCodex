@@ -4,7 +4,6 @@
 // Exports: SidebarThreadRowView
 
 import SwiftUI
-import UIKit
 
 struct SidebarThreadRowView: View {
     let thread: CodexThread
@@ -12,18 +11,14 @@ struct SidebarThreadRowView: View {
     let runBadgeState: CodexThreadRunBadgeState?
     let timingLabel: String?
     let diffTotals: TurnSessionDiffTotals?
-    let isPinned: Bool
-    let pinnedProjectLabel: String?
     let childSubagentCount: Int
     let isSubagentExpanded: Bool
     let onToggleSubagents: (() -> Void)?
     let onTap: () -> Void
-    var onRename: ((String) -> Void)? = nil
-    var onPinToggle: (() -> Void)? = nil
+    var onRenameRequest: (() -> Void)? = nil
     var onArchiveToggle: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
 
-    @State private var renamePrompt = ThreadRenamePromptState()
     private let titleLeadingSlotWidth: CGFloat = 16
 
     var body: some View {
@@ -42,9 +37,6 @@ struct SidebarThreadRowView: View {
         }
         .padding(.horizontal, 12)
         .contextMenu { contextMenuContent }
-        .threadRenamePrompt(state: $renamePrompt) { newName in
-            onRename?(newName)
-        }
     }
 
     // MARK: - Parent row (no CodexService dependency)
@@ -55,52 +47,19 @@ struct SidebarThreadRowView: View {
                 leadingIndicatorSlot
 
                 // Keep trailing metadata inside the main stack so long titles truncate before it.
-                Group {
-                    if let pinnedProjectLabel, !pinnedProjectLabel.isEmpty {
-                        HStack(spacing: 6) {
-                            if isPinned && !thread.isSubagent {
-                                Image(systemName: "pin.fill")
-                                    .font(AppFont.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(.secondary)
-                            }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(thread.displayTitle)
+                        .font(AppFont.body())
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .foregroundStyle(.primary)
 
-                            Text(thread.displayTitle)
-                                .font(AppFont.body())
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                                .foregroundStyle(.primary)
-
-                            Text(pinnedProjectLabel)
-                                .font(AppFont.footnote())
-                                .foregroundStyle(.tertiary)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                                .layoutPriority(1)
-                        }
-                    } else {
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 6) {
-                                if isPinned && !thread.isSubagent {
-                                    Image(systemName: "pin.fill")
-                                        .font(AppFont.system(size: 10, weight: .semibold))
-                                        .foregroundStyle(.secondary)
-                                }
-
-                                Text(thread.displayTitle)
-                                    .font(AppFont.body())
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                                    .foregroundStyle(.primary)
-                            }
-
-                            if thread.syncState == .archivedLocal {
-                                Text("Stored locally")
-                                    .font(AppFont.footnote())
-                                    .foregroundStyle(.tertiary)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                            }
-                        }
+                    if thread.syncState == .archivedLocal {
+                        Text("Stored locally")
+                            .font(AppFont.footnote())
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -247,17 +206,10 @@ struct SidebarThreadRowView: View {
 
     @ViewBuilder
     private var contextMenuContent: some View {
-        Button {
-            HapticFeedback.shared.triggerImpactFeedback(style: .light)
-            UIPasteboard.general.string = thread.sessionId
-        } label: {
-            Label("Copy sessionId", systemImage: "doc.on.doc")
-        }
-
-        if onRename != nil {
+        if let onRenameRequest {
             Button {
                 HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                renamePrompt.present(currentTitle: thread.displayTitle)
+                onRenameRequest()
             } label: {
                 Label("Rename", systemImage: "pencil")
             }
@@ -275,24 +227,12 @@ struct SidebarThreadRowView: View {
             }
         }
 
-        if let onPinToggle, thread.syncState != .archivedLocal, !thread.isSubagent {
-            Button {
-                HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                onPinToggle()
-            } label: {
-                Label(
-                    isPinned ? "Unpin" : "Pin",
-                    systemImage: isPinned ? "pin.slash" : "pin"
-                )
-            }
-        }
-
         if let onDelete {
             Button(role: .destructive) {
                 HapticFeedback.shared.triggerImpactFeedback(style: .light)
                 onDelete()
             } label: {
-                Label("Remove from Phone", systemImage: "trash")
+                Label("Delete", systemImage: "trash")
             }
         }
     }

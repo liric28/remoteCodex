@@ -61,7 +61,7 @@ extension CodexService {
         do {
             try await sendReviewStart(
                 request,
-                to: initialThreadId,
+                to: initialThreadId
             )
             return initialThreadId
         } catch {

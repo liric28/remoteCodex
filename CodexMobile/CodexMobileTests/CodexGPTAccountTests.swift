@@ -12,43 +12,6 @@ import XCTest
 final class CodexGPTAccountTests: XCTestCase {
     private static var retainedServices: [CodexService] = []
 
-    func testKnownWindowsBridgeDoesNotUseLegacyMacDisplayWakeFallback() {
-        let service = makeService()
-        let macDeviceID = "host-\(UUID().uuidString)"
-
-        service.lastTrustedMacDeviceId = macDeviceID
-        service.trustedMacRegistry.records[macDeviceID] = CodexTrustedMacRecord(
-            macDeviceId: macDeviceID,
-            macIdentityPublicKey: Data(repeating: 7, count: 32).base64EncodedString(),
-            lastPairedAt: Date()
-        )
-        service.gptAccountSnapshot.hostPlatform = .windows
-        service.gptAccountSnapshot.hostCapabilities = nil
-
-        XCTAssertEqual(service.bridgeHostPlatform, .windows)
-        XCTAssertFalse(service.supportsDisplayWake)
-        XCTAssertFalse(service.supportsDesktopAppHandoff)
-        XCTAssertFalse(service.supportsKeepAwakeWhileBridgeRuns)
-    }
-
-    func testKnownMacBridgeKeepsLegacyDisplayWakeFallback() {
-        let service = makeService()
-        let macDeviceID = "mac-\(UUID().uuidString)"
-
-        service.lastTrustedMacDeviceId = macDeviceID
-        service.trustedMacRegistry.records[macDeviceID] = CodexTrustedMacRecord(
-            macDeviceId: macDeviceID,
-            macIdentityPublicKey: Data(repeating: 8, count: 32).base64EncodedString(),
-            lastPairedAt: Date()
-        )
-        service.gptAccountSnapshot.hostPlatform = .macOS
-        service.gptAccountSnapshot.hostCapabilities = nil
-
-        XCTAssertTrue(service.supportsDisplayWake)
-        XCTAssertTrue(service.supportsDesktopAppHandoff)
-        XCTAssertTrue(service.supportsKeepAwakeWhileBridgeRuns)
-    }
-
     func testRefreshGPTAccountStateDecodesSanitizedBridgeStatus() async {
         let service = makeService()
         service.isConnected = true
@@ -135,8 +98,8 @@ final class CodexGPTAccountTests: XCTestCase {
                     "loginInFlight": .bool(false),
                     "needsReauth": .bool(false),
                     "tokenReady": .bool(true),
-                    "bridgeVersion": .string("1.3.9"),
-                    "bridgeLatestVersion": .string("1.4.0"),
+                    "bridgeVersion": .string("1.3.7"),
+                    "bridgeLatestVersion": .string("1.3.8"),
                 ]),
                 includeJSONRPC: false
             )
@@ -144,8 +107,8 @@ final class CodexGPTAccountTests: XCTestCase {
 
         await service.refreshBridgeVersionState(allowAvailableBridgeUpdatePrompt: true)
 
-        XCTAssertEqual(service.bridgeInstalledVersion, "1.3.9")
-        XCTAssertEqual(service.latestBridgePackageVersion, "1.4.0")
+        XCTAssertEqual(service.bridgeInstalledVersion, "1.3.7")
+        XCTAssertEqual(service.latestBridgePackageVersion, "1.3.8")
         XCTAssertEqual(
             service.bridgeUpdatePrompt?.title,
             "A newer Remodex update is available on your Mac"
@@ -169,8 +132,8 @@ final class CodexGPTAccountTests: XCTestCase {
                     "loginInFlight": .bool(false),
                     "needsReauth": .bool(false),
                     "tokenReady": .bool(true),
-                    "bridgeVersion": .string("1.3.9"),
-                    "bridgeLatestVersion": .string("1.4.0"),
+                    "bridgeVersion": .string("1.3.7"),
+                    "bridgeLatestVersion": .string("1.3.8"),
                 ]),
                 includeJSONRPC: false
             )
@@ -196,8 +159,8 @@ final class CodexGPTAccountTests: XCTestCase {
                     "loginInFlight": .bool(false),
                     "needsReauth": .bool(false),
                     "tokenReady": .bool(true),
-                    "bridgeVersion": .string("1.3.9"),
-                    "bridgeLatestVersion": .string("1.4.0"),
+                    "bridgeVersion": .string("1.3.7"),
+                    "bridgeLatestVersion": .string("1.3.8"),
                 ]),
                 includeJSONRPC: false
             )
@@ -231,8 +194,8 @@ final class CodexGPTAccountTests: XCTestCase {
                     "loginInFlight": .bool(false),
                     "needsReauth": .bool(false),
                     "tokenReady": .bool(true),
-                    "bridgeVersion": .string("1.3.9"),
-                    "bridgeLatestVersion": .string("1.4.0"),
+                    "bridgeVersion": .string("1.3.7"),
+                    "bridgeLatestVersion": .string("1.3.8"),
                 ]),
                 includeJSONRPC: false
             )
@@ -241,8 +204,8 @@ final class CodexGPTAccountTests: XCTestCase {
         service.setForegroundState(true)
         await yieldMainActor(times: 3)
 
-        XCTAssertEqual(service.bridgeInstalledVersion, "1.3.9")
-        XCTAssertEqual(service.latestBridgePackageVersion, "1.4.0")
+        XCTAssertEqual(service.bridgeInstalledVersion, "1.3.7")
+        XCTAssertEqual(service.latestBridgePackageVersion, "1.3.8")
         XCTAssertEqual(
             service.bridgeUpdatePrompt?.title,
             "A newer Remodex update is available on your Mac"

@@ -107,21 +107,16 @@ final class SubscriptionService {
     }
 
     var hasFreeSendAccess: Bool {
-        freeSendCount < Self.freeSendLimit
+        true
     }
 
     var hasAppAccess: Bool {
-        hasProAccess || hasFreeSendAccess
+        true
     }
 
     // Counts a valid send attempt for free users even if the turn later fails.
     func consumeFreeSendAttemptIfNeeded() {
-        guard !hasProAccess, freeSendCount < Self.freeSendLimit else {
-            return
-        }
-
-        freeSendCount += 1
-        defaults.set(freeSendCount, forKey: Self.freeSendCountDefaultsKey)
+        return
     }
 
     // Bootstraps subscription state once at launch or from the recovery retry action.
@@ -248,24 +243,6 @@ final class SubscriptionService {
 
         isRestoring = false
         await refreshCustomerInfoSilently()
-    }
-
-    // Syncs StoreKit purchases that may have happened in Apple's code redemption sheet.
-    func syncPurchasesAfterOfferCodeRedemption() async {
-        startCustomerInfoObserverIfConfigured()
-        guard Purchases.isConfigured else {
-            lastErrorMessage = "Subscriptions are unavailable right now."
-            return
-        }
-
-        do {
-            let syncedInfo = try await Purchases.shared.syncPurchases()
-            applyCustomerInfo(syncedInfo)
-            bootstrapState = .ready
-        } catch {
-            lastErrorMessage = userFacingMessage(for: error)
-            await refreshCustomerInfoSilently()
-        }
     }
 }
 

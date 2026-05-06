@@ -27,7 +27,7 @@ final class AssistantTurnEndActionVisibilityTests: XCTestCase {
                 helperText: "This response is still collecting its final patch.",
                 riskLevel: .blocked
             ),
-            blockRevertMessage: nil
+            blockRevertTargetMessage: nil
         )
 
         XCTAssertFalse(
@@ -54,7 +54,7 @@ final class AssistantTurnEndActionVisibilityTests: XCTestCase {
                 helperText: "Only changes from this response will be reverted unless later edits overlap.",
                 riskLevel: .safe
             ),
-            blockRevertMessage: nil
+            blockRevertTargetMessage: nil
         )
 
         XCTAssertTrue(
@@ -69,7 +69,7 @@ final class AssistantTurnEndActionVisibilityTests: XCTestCase {
             blockDiffText: nil,
             blockDiffEntries: nil,
             blockRevertPresentation: nil,
-            blockRevertMessage: nil
+            blockRevertTargetMessage: nil
         )
 
         XCTAssertFalse(
@@ -91,7 +91,7 @@ final class AssistantTurnEndActionVisibilityTests: XCTestCase {
                 )
             ],
             blockRevertPresentation: nil,
-            blockRevertMessage: nil
+            blockRevertTargetMessage: nil
         )
 
         XCTAssertTrue(

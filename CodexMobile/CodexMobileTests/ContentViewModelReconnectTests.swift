@@ -23,38 +23,12 @@ final class ContentViewModelReconnectTests: XCTestCase {
         super.tearDown()
     }
 
-    func testTrustedResolveURLCandidatesTryProxyRelativeThenRootRoute() {
-        let candidates = CodexTrustedSessionResolveURLBuilder.candidates(
-            from: "wss://relay.example.com/remodex/relay?stale=1#old"
-        )
-
-        XCTAssertEqual(
-            candidates.map(\.absoluteString),
-            [
-                "https://relay.example.com/remodex/v1/trusted/session/resolve",
-                "https://relay.example.com/v1/trusted/session/resolve",
-            ]
-        )
-    }
-
-    func testTrustedResolveURLCandidatesDoNotDuplicateRootRoute() {
-        let candidates = CodexTrustedSessionResolveURLBuilder.candidates(
-            from: "ws://relay.example.com/relay?stale=1"
-        )
-
-        XCTAssertEqual(
-            candidates.map(\.absoluteString),
-            [
-                "http://relay.example.com/v1/trusted/session/resolve",
-            ]
-        )
-    }
-
-    func testPreferredReconnectURLFallsBackToSavedSessionWhenTrustedResolveReportsOffline() async {
+    func testPreferredReconnectURLResolvesTrustedSessionBeforeSavedFallback() async {
         let service = makeService()
         let viewModel = ContentViewModel()
         let macDeviceID = "mac-\(UUID().uuidString)"
         let relayURL = "wss://relay.local/relay"
+        var resolveAttempts = 0
 
         service.trustedMacRegistry.records[macDeviceID] = CodexTrustedMacRecord(
             macDeviceId: macDeviceID,
@@ -68,12 +42,20 @@ final class ContentViewModelReconnectTests: XCTestCase {
         service.relayMacDeviceId = macDeviceID
         service.lastErrorMessage = "stale error"
         service.trustedSessionResolverOverride = {
-            throw CodexTrustedSessionResolveError.macOffline("Your trusted Mac is offline right now.")
+            resolveAttempts += 1
+            return CodexTrustedSessionResolveResponse(
+                ok: true,
+                macDeviceId: macDeviceID,
+                macIdentityPublicKey: Data(repeating: 10, count: 32).base64EncodedString(),
+                displayName: "My Mac",
+                sessionId: "live-session"
+            )
         }
 
         let reconnectURL = await viewModel.preferredReconnectURL(codex: service)
 
-        XCTAssertEqual(reconnectURL, "\(relayURL)/saved-session")
+        XCTAssertEqual(reconnectURL, "\(relayURL)/live-session")
+        XCTAssertEqual(resolveAttempts, 1)
         XCTAssertNil(service.lastErrorMessage)
     }
 
@@ -97,94 +79,68 @@ final class ContentViewModelReconnectTests: XCTestCase {
         let reconnectURL = await viewModel.preferredReconnectURL(codex: service)
 
         XCTAssertNil(reconnectURL)
-        XCTAssertEqual(service.lastErrorMessage, "Your trusted Mac is offline right now.")
+        XCTAssertEqual(
+            service.lastErrorMessage,
+            "Your trusted Mac is offline right now. On your Mac, run `remodex status`. If the bridge is stopped or stuck, run `remodex restart`."
+        )
     }
 
-    func testPreferredReconnectURLStopsWithUnsupportedRelayWithoutForcingRePair() async {
+    func testPreferredReconnectURLStopsWhenLocalOnlyRelayIsUnreachableAcrossNetworks() async {
         let service = makeService()
         let viewModel = ContentViewModel()
         let macDeviceID = "mac-\(UUID().uuidString)"
-        let relayURL = "wss://relay.local/relay"
+        let relayURL = "ws://192.168.1.105:9000/relay"
 
         service.trustedMacRegistry.records[macDeviceID] = CodexTrustedMacRecord(
             macDeviceId: macDeviceID,
-            macIdentityPublicKey: Data(repeating: 16, count: 32).base64EncodedString(),
+            macIdentityPublicKey: Data(repeating: 22, count: 32).base64EncodedString(),
             lastPairedAt: Date(),
             relayURL: relayURL
         )
         service.lastTrustedMacDeviceId = macDeviceID
-        service.shouldAutoReconnectOnForeground = true
+        service.relaySessionId = "saved-session"
+        service.relayUrl = relayURL
+        service.relayMacDeviceId = macDeviceID
         service.trustedSessionResolverOverride = {
-            throw CodexTrustedSessionResolveError.unsupportedRelay
+            throw CodexTrustedSessionResolveError.network(
+                "Could not reach the trusted Mac relay. Check your connection and try again."
+            )
         }
 
         let reconnectURL = await viewModel.preferredReconnectURL(codex: service)
 
         XCTAssertNil(reconnectURL)
-        XCTAssertEqual(service.secureConnectionState, .liveSessionUnresolved)
-        XCTAssertFalse(service.shouldAutoReconnectOnForeground)
         XCTAssertEqual(
             service.lastErrorMessage,
-            "Trusted reconnect is unavailable from this relay endpoint. Update or check the relay/proxy, then reconnect. Scan a new QR code only if this Mac was reset."
+            "This Mac is paired through a local-only relay at \(relayURL). Reconnect requires the iPhone to be on the same LAN or shared VPN/Tailscale network."
         )
     }
 
-    func testWakeDisplayRequiresSavedLiveSessionURL() {
+    func testPreferredReconnectURLFallsBackWhenPublicRelayResolveFails() async {
         let service = makeService()
+        let viewModel = ContentViewModel()
         let macDeviceID = "mac-\(UUID().uuidString)"
-        let relayURL = "wss://relay.local/relay"
+        let relayURL = "wss://relay.example.com/relay"
 
         service.trustedMacRegistry.records[macDeviceID] = CodexTrustedMacRecord(
             macDeviceId: macDeviceID,
-            macIdentityPublicKey: Data(repeating: 17, count: 32).base64EncodedString(),
+            macIdentityPublicKey: Data(repeating: 23, count: 32).base64EncodedString(),
             lastPairedAt: Date(),
             relayURL: relayURL
         )
         service.lastTrustedMacDeviceId = macDeviceID
-
-        XCTAssertTrue(service.hasReconnectCandidate)
-        XCTAssertFalse(service.canWakePreferredMacDisplay)
-
         service.relaySessionId = "saved-session"
         service.relayUrl = relayURL
         service.relayMacDeviceId = macDeviceID
-        service.relayMacIdentityPublicKey = Data(repeating: 17, count: 32).base64EncodedString()
+        service.trustedSessionResolverOverride = {
+            throw CodexTrustedSessionResolveError.network(
+                "Could not reach the trusted Mac relay. Check your connection and try again."
+            )
+        }
 
-        XCTAssertTrue(service.canWakePreferredMacDisplay)
-    }
+        let reconnectURL = await viewModel.preferredReconnectURL(codex: service)
 
-    func testRecoverTrustedReconnectCandidatePreservesTrustedMacAndRelayBaseURL() {
-        let service = makeService()
-        let macDeviceID = "mac-\(UUID().uuidString)"
-        let relayURL = "wss://relay.local/relay"
-        let macPublicKey = Data(repeating: 18, count: 32).base64EncodedString()
-
-        service.trustedMacRegistry.records[macDeviceID] = CodexTrustedMacRecord(
-            macDeviceId: macDeviceID,
-            macIdentityPublicKey: macPublicKey,
-            lastPairedAt: Date(),
-            relayURL: relayURL
-        )
-        service.lastTrustedMacDeviceId = macDeviceID
-        service.relaySessionId = "stale-session"
-        service.relayUrl = relayURL
-        service.relayMacDeviceId = macDeviceID
-        service.relayMacIdentityPublicKey = macPublicKey
-
-        service.recoverTrustedReconnectCandidate()
-
-        XCTAssertNil(service.normalizedRelaySessionId)
-        XCTAssertEqual(service.normalizedRelayURL, relayURL)
-        XCTAssertEqual(service.normalizedRelayMacDeviceId, macDeviceID)
-        XCTAssertEqual(service.normalizedRelayMacIdentityPublicKey, macPublicKey)
-        XCTAssertFalse(service.hasSavedRelaySession)
-        XCTAssertTrue(service.hasTrustedMacReconnectCandidate)
-        XCTAssertEqual(service.secureConnectionState, .liveSessionUnresolved)
-        XCTAssertFalse(service.canWakePreferredMacDisplay)
-        XCTAssertEqual(
-            service.lastErrorMessage,
-            "Secure reconnect could not be restored from the saved session. Try reconnecting again."
-        )
+        XCTAssertEqual(reconnectURL, "\(relayURL)/saved-session")
     }
 
     func testForegroundReconnectKeepsRetryIntentArmedAfterRetryableFailures() async {
@@ -210,7 +166,7 @@ final class ContentViewModelReconnectTests: XCTestCase {
         XCTAssertEqual(service.connectionRecoveryState, .retrying(attempt: 2, message: "Reconnecting..."))
     }
 
-    func testManualReconnectReResolvesReconnectURLBetweenRetryAttempts() async {
+    func testManualReconnectUsesResolvedTrustedSessionBeforeSavedSession() async {
         let service = makeService()
         let viewModel = ContentViewModel()
         let macDeviceID = "mac-\(UUID().uuidString)"
@@ -231,9 +187,6 @@ final class ContentViewModelReconnectTests: XCTestCase {
         viewModel.reconnectSleepOverride = { _ in }
         service.trustedSessionResolverOverride = {
             resolveAttempts += 1
-            if resolveAttempts == 1 {
-                throw CodexTrustedSessionResolveError.macOffline("Your trusted Mac is offline right now.")
-            }
             return CodexTrustedSessionResolveResponse(
                 ok: true,
                 macDeviceId: macDeviceID,
@@ -244,17 +197,142 @@ final class ContentViewModelReconnectTests: XCTestCase {
         }
         viewModel.connectOverride = { _, serverURL in
             attemptedURLs.append(serverURL)
-            if attemptedURLs.count == 1 {
-                throw CodexServiceError.invalidInput("WebSocket closed during connect (4002)")
+        }
+
+        await viewModel.toggleConnection(codex: service)
+
+        XCTAssertEqual(resolveAttempts, 1)
+        XCTAssertEqual(
+            attemptedURLs,
+            ["\(relayURL)/live-session"]
+        )
+        XCTAssertFalse(viewModel.isAttemptingManualReconnect)
+    }
+
+    func testManualReconnectFallsBackToSavedSessionWhenTrustedResolveIsUnsupported() async {
+        let service = makeService()
+        let viewModel = ContentViewModel()
+        let macDeviceID = "mac-\(UUID().uuidString)"
+        let relayURL = "wss://relay.local/relay"
+        var resolveAttempts = 0
+        var attemptedURLs: [String] = []
+
+        service.trustedMacRegistry.records[macDeviceID] = CodexTrustedMacRecord(
+            macDeviceId: macDeviceID,
+            macIdentityPublicKey: Data(repeating: 18, count: 32).base64EncodedString(),
+            lastPairedAt: Date(),
+            relayURL: relayURL
+        )
+        service.lastTrustedMacDeviceId = macDeviceID
+        service.relaySessionId = "saved-session"
+        service.relayUrl = relayURL
+        service.relayMacDeviceId = macDeviceID
+        viewModel.reconnectSleepOverride = { _ in }
+        service.trustedSessionResolverOverride = {
+            resolveAttempts += 1
+            throw CodexTrustedSessionResolveError.unsupportedRelay
+        }
+        viewModel.connectOverride = { _, serverURL in
+            attemptedURLs.append(serverURL)
+        }
+
+        await viewModel.toggleConnection(codex: service)
+
+        XCTAssertEqual(resolveAttempts, 1)
+        XCTAssertEqual(
+            attemptedURLs,
+            ["\(relayURL)/saved-session"]
+        )
+        XCTAssertFalse(viewModel.isAttemptingManualReconnect)
+    }
+
+    func testManualReconnectFallsBackToSavedSessionWhenTrustedMacIsOfflineButSavedSessionExists() async {
+        let service = makeService()
+        let viewModel = ContentViewModel()
+        let macDeviceID = "mac-\(UUID().uuidString)"
+        let relayURL = "wss://relay.local/relay"
+        var resolveAttempts = 0
+        var attemptedURLs: [String] = []
+
+        service.trustedMacRegistry.records[macDeviceID] = CodexTrustedMacRecord(
+            macDeviceId: macDeviceID,
+            macIdentityPublicKey: Data(repeating: 20, count: 32).base64EncodedString(),
+            lastPairedAt: Date(),
+            relayURL: relayURL
+        )
+        service.lastTrustedMacDeviceId = macDeviceID
+        service.relaySessionId = "saved-session"
+        service.relayUrl = relayURL
+        service.relayMacDeviceId = macDeviceID
+        viewModel.reconnectSleepOverride = { _ in }
+        service.trustedSessionResolverOverride = {
+            resolveAttempts += 1
+            throw CodexTrustedSessionResolveError.macOffline("Your trusted Mac is offline right now.")
+        }
+        viewModel.connectOverride = { _, serverURL in
+            attemptedURLs.append(serverURL)
+        }
+
+        await viewModel.toggleConnection(codex: service)
+
+        XCTAssertEqual(resolveAttempts, 1)
+        XCTAssertEqual(attemptedURLs, ["\(relayURL)/saved-session"])
+        XCTAssertNil(service.lastErrorMessage)
+        XCTAssertFalse(viewModel.isAttemptingManualReconnect)
+    }
+
+    func testManualReconnectBacksOffAfterResolvedLiveSessionTimeout() async {
+        let service = makeService()
+        let viewModel = ContentViewModel()
+        let macDeviceID = "mac-\(UUID().uuidString)"
+        let relayURL = "wss://relay.local/relay"
+        var resolveAttempts = 0
+        var attemptedURLs: [String] = []
+        var sleepCount = 0
+
+        service.trustedMacRegistry.records[macDeviceID] = CodexTrustedMacRecord(
+            macDeviceId: macDeviceID,
+            macIdentityPublicKey: Data(repeating: 16, count: 32).base64EncodedString(),
+            lastPairedAt: Date(),
+            relayURL: relayURL
+        )
+        service.lastTrustedMacDeviceId = macDeviceID
+        service.relaySessionId = "saved-session"
+        service.relayUrl = relayURL
+        service.relayMacDeviceId = macDeviceID
+        viewModel.reconnectSleepOverride = { _ in
+            sleepCount += 1
+        }
+        service.trustedSessionResolverOverride = {
+            resolveAttempts += 1
+            return CodexTrustedSessionResolveResponse(
+                ok: true,
+                macDeviceId: macDeviceID,
+                macIdentityPublicKey: Data(repeating: 17, count: 32).base64EncodedString(),
+                displayName: "My Mac",
+                sessionId: "live-session-\(resolveAttempts)"
+            )
+        }
+        viewModel.connectOverride = { _, serverURL in
+            attemptedURLs.append(serverURL)
+            if attemptedURLs.count <= 2 {
+                throw CodexServiceError.invalidInput(
+                    "Connection timed out after 12s while opening the direct relay socket."
+                )
             }
         }
 
         await viewModel.toggleConnection(codex: service)
 
-        XCTAssertEqual(resolveAttempts, 2)
+        XCTAssertEqual(resolveAttempts, 3)
+        XCTAssertEqual(sleepCount, 2)
         XCTAssertEqual(
             attemptedURLs,
-            ["\(relayURL)/saved-session", "\(relayURL)/live-session"]
+            [
+                "\(relayURL)/live-session-1",
+                "\(relayURL)/live-session-2",
+                "\(relayURL)/live-session-3",
+            ]
         )
         XCTAssertFalse(viewModel.isAttemptingManualReconnect)
     }
@@ -274,9 +352,7 @@ final class ContentViewModelReconnectTests: XCTestCase {
             relayURL: relayURL
         )
         service.lastTrustedMacDeviceId = macDeviceID
-        service.relaySessionId = "saved-session"
         service.relayUrl = relayURL
-        service.relayMacDeviceId = macDeviceID
         service.shouldAutoReconnectOnForeground = true
         viewModel.reconnectSleepOverride = { _ in await Task.yield() }
         service.trustedSessionResolverOverride = {

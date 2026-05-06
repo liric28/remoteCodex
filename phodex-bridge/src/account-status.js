@@ -14,7 +14,6 @@ function composeAccountStatus({
   loginInFlight = false,
   bridgeVersionInfo = null,
   transportMode = null,
-  hostPlatform = process.platform,
 } = {}) {
   const account = accountRead?.account || null;
   const authToken = normalizeString(authStatus?.authToken);
@@ -48,8 +47,6 @@ function composeAccountStatus({
     ]) || null,
     bridgeLatestVersion: normalizeString(bridgeVersionInfo?.bridgeLatestVersion) || null,
     codexTransportMode: normalizeString(transportMode) || null,
-    hostPlatform: normalizeHostPlatform(hostPlatform),
-    hostCapabilities: deriveHostCapabilities(hostPlatform),
   };
 }
 
@@ -61,7 +58,6 @@ function redactAuthStatus(authStatus = null, extras = {}) {
     loginInFlight: Boolean(extras.loginInFlight),
     bridgeVersionInfo: extras.bridgeVersionInfo || null,
     transportMode: extras.transportMode || null,
-    hostPlatform: extras.hostPlatform || process.platform,
   });
 
   return {
@@ -76,8 +72,6 @@ function redactAuthStatus(authStatus = null, extras = {}) {
     bridgeVersion: composed.bridgeVersion,
     bridgeLatestVersion: composed.bridgeLatestVersion,
     codexTransportMode: composed.codexTransportMode,
-    hostPlatform: composed.hostPlatform,
-    hostCapabilities: composed.hostCapabilities,
   };
 }
 
@@ -92,7 +86,6 @@ function composeSanitizedAuthStatusFromSettledResults({
   loginInFlight = false,
   bridgeVersionInfo = null,
   transportMode = null,
-  hostPlatform = process.platform,
 } = {}) {
   const accountRead = accountReadResult?.status === "fulfilled" ? accountReadResult.value : null;
   const authStatus = authStatusResult?.status === "fulfilled" ? authStatusResult.value : null;
@@ -108,7 +101,6 @@ function composeSanitizedAuthStatusFromSettledResults({
     loginInFlight: Boolean(loginInFlight),
     bridgeVersionInfo,
     transportMode,
-    hostPlatform,
   });
 }
 
@@ -143,29 +135,6 @@ function normalizeString(value) {
 
 function parseBoolean(value) {
   return value === true;
-}
-
-function normalizeHostPlatform(platform) {
-  switch (platform) {
-    case "darwin":
-      return "macos";
-    case "linux":
-      return "linux";
-    case "win32":
-      return "windows";
-    default:
-      return "unknown";
-  }
-}
-
-function deriveHostCapabilities(platform) {
-  const isMacOS = platform === "darwin";
-  return {
-    desktopHandoff: isMacOS,
-    displayWake: isMacOS,
-    keepAwake: isMacOS,
-    hostBrowserLogin: isMacOS,
-  };
 }
 
 module.exports = {

@@ -13,6 +13,7 @@ import Security
 // Image-heavy thread history and secure-envelope overhead can legitimately exceed 4 MB while
 // reopening a chat, so the limit needs enough headroom for background `thread/read` catches too.
 let codexWebSocketMaximumMessageSizeBytes = 16 * 1024 * 1024
+let codexWebSocketHeartbeatIntervalNanoseconds: UInt64 = 20_000_000_000
 
 private enum CodexRelayTransportPreference {
     case manualTCP
@@ -45,6 +46,88 @@ private func codexLogPairingTransport(_ message: String) {
 }
 
 extension CodexService {
+    func startWebSocketHeartbeat() {
+        stopWebSocketHeartbeat()
+
+        guard isConnected else {
+            return
+        }
+
+        let connection = webSocketConnection
+        let task = webSocketTask
+        let usesManualTransport = usesManualWebSocketTransport
+
+        webSocketHeartbeatTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: codexWebSocketHeartbeatIntervalNanoseconds)
+                guard !Task.isCancelled else { return }
+                guard self.isConnected else { return }
+
+                let isSameTransport = self.webSocketConnection === connection
+                    && self.webSocketTask === task
+                    && self.usesManualWebSocketTransport == usesManualTransport
+                guard isSameTransport else {
+                    return
+                }
+
+                do {
+                    try await self.sendWebSocketHeartbeat()
+                } catch {
+                    if self.shouldTreatSendFailureAsDisconnect(error) || self.isBenignBackgroundDisconnect(error) {
+                        self.handleReceiveError(error)
+                    }
+                    return
+                }
+            }
+        }
+    }
+
+    func stopWebSocketHeartbeat() {
+        webSocketHeartbeatTask?.cancel()
+        webSocketHeartbeatTask = nil
+    }
+
+    func sendWebSocketHeartbeat() async throws {
+        if usesManualWebSocketTransport {
+            guard let connection = webSocketConnection else {
+                throw CodexServiceError.disconnected
+            }
+            try await sendManualWebSocketFrame(opcode: 0x9, payload: Data(), on: connection)
+            return
+        }
+
+        if let task = webSocketTask {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                task.sendPing { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume(returning: ())
+                    }
+                }
+            }
+            return
+        }
+
+        guard let connection = webSocketConnection else {
+            throw CodexServiceError.disconnected
+        }
+
+        let metadata = NWProtocolWebSocket.Metadata(opcode: .ping)
+        let context = NWConnection.ContentContext(identifier: "codex-heartbeat", metadata: [metadata])
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            connection.send(content: nil, contentContext: context, isComplete: true, completion: .contentProcessed { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: ())
+                }
+            })
+        }
+    }
+
     // Rejects oversized relay frames before Network.framework turns them into a raw EMSGSIZE failure.
     func validateOutgoingWebSocketMessageSize(_ text: String) throws {
         let payloadSize = Data(text.utf8).count
@@ -56,13 +139,7 @@ extension CodexService {
     }
 
     // Sends an RPC request and waits for the matching response by request id.
-    // Optional per-call timeout is reserved for non-critical reads that can fail open.
-    func sendRequest(
-        method: String,
-        params: JSONValue?,
-        timeoutNanoseconds: UInt64? = nil,
-        timeoutMessage: String? = nil
-    ) async throws -> RPCMessage {
+    func sendRequest(method: String, params: JSONValue?) async throws -> RPCMessage {
         if let requestTransportOverride {
             return try await requestTransportOverride(method, params)
         }
@@ -88,67 +165,25 @@ extension CodexService {
             )
         }
 
-        try Task.checkCancellation()
+        return try await withCheckedThrowingContinuation { continuation in
+            pendingRequests[requestKey] = continuation
 
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                pendingRequests[requestKey] = continuation
-                scheduleRequestTimeoutIfNeeded(
-                    requestKey: requestKey,
-                    method: method,
-                    timeoutNanoseconds: timeoutNanoseconds,
-                    timeoutMessage: timeoutMessage
-                )
+            Task {
+                do {
+                    try await sendMessage(request)
+                } catch {
+                    if shouldTreatSendFailureAsDisconnect(error) {
+                        handleReceiveError(error)
+                        return
+                    }
 
-                Task {
-                    do {
-                        try await sendMessage(request)
-                    } catch {
-                        if shouldTreatSendFailureAsDisconnect(error) {
-                            handleReceiveError(error)
-                            return
-                        }
-
-                        // Avoid double-resume if the request was already completed
-                        // (for example by a disconnect race that fails all pending requests).
-                        if let pendingContinuation = pendingRequests.removeValue(forKey: requestKey) {
-                            pendingContinuation.resume(throwing: error)
-                        }
+                    // Avoid double-resume if the request was already completed
+                    // (for example by a disconnect race that fails all pending requests).
+                    if let pendingContinuation = pendingRequests.removeValue(forKey: requestKey) {
+                        pendingContinuation.resume(throwing: error)
                     }
                 }
             }
-        } onCancel: {
-            Task { @MainActor [weak self] in
-                guard let self,
-                      let continuation = self.pendingRequests.removeValue(forKey: requestKey) else {
-                    return
-                }
-                continuation.resume(throwing: CancellationError())
-            }
-        }
-    }
-
-    // Clears a still-pending request after the caller's timeout so late responses are ignored safely.
-    func scheduleRequestTimeoutIfNeeded(
-        requestKey: String,
-        method: String,
-        timeoutNanoseconds: UInt64?,
-        timeoutMessage: String?
-    ) {
-        guard let timeoutNanoseconds, timeoutNanoseconds > 0 else {
-            return
-        }
-
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: timeoutNanoseconds)
-            guard let self,
-                  let continuation = self.pendingRequests.removeValue(forKey: requestKey) else {
-                return
-            }
-            let message = timeoutMessage ?? "\(method) timed out while loading this chat."
-            continuation.resume(
-                throwing: CodexServiceError.invalidInput(message)
-            )
         }
     }
 

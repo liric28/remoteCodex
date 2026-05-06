@@ -11,16 +11,6 @@ import UIKit
 
 @MainActor
 final class CodexServiceConnectionErrorTests: XCTestCase {
-    func testKeepMacAwakePreferenceDefaultsToDisabled() {
-        let suiteName = "CodexServiceConnectionErrorTests.keepMacAwake.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defaults.removePersistentDomain(forName: suiteName)
-
-        let service = CodexService(defaults: defaults)
-
-        XCTAssertFalse(service.keepMacAwakeWhileBridgeRuns)
-    }
-
     func testBenignBackgroundAbortIsSuppressedFromUserFacingErrors() {
         let service = CodexService()
         let error = NWError.posix(.ECONNABORTED)
@@ -156,40 +146,6 @@ final class CodexServiceConnectionErrorTests: XCTestCase {
         XCTAssertEqual(service.userFacingTurnErrorMessage(from: error), "")
     }
 
-    func testCancellationErrorIsHiddenFromTurnFooter() {
-        let service = CodexService()
-
-        XCTAssertEqual(service.userFacingTurnErrorMessage(from: CancellationError()), "")
-        XCTAssertNil(service.userFacingTurnErrorMessageForFooter(from: CancellationError()))
-        XCTAssertTrue(service.shouldSuppressRuntimeErrorInChat(CancellationError()))
-    }
-
-    func testTurnStartCancellationDoesNotAppendEmptySendError() {
-        let service = CodexService()
-        let threadID = "thread-\(UUID().uuidString)"
-        let pendingMessageID = "message-\(UUID().uuidString)"
-        service.messagesByThread[threadID] = [
-            CodexMessage(
-                id: pendingMessageID,
-                threadId: threadID,
-                role: .user,
-                text: "hello",
-                deliveryState: .pending
-            )
-        ]
-
-        XCTAssertThrowsError(
-            try service.handleTurnStartFailure(
-                CancellationError(),
-                pendingMessageId: pendingMessageID,
-                threadId: threadID
-            )
-        )
-
-        XCTAssertNil(service.lastErrorMessage)
-        XCTAssertFalse(service.messages(for: threadID).contains { $0.text == "Send error: " })
-    }
-
     func testConnectTimeSessionUnavailableCloseIsRetryable() {
         let service = CodexService()
         let error = CodexServiceError.invalidInput("WebSocket closed during connect (4002)")
@@ -265,6 +221,19 @@ final class CodexServiceConnectionErrorTests: XCTestCase {
         let service = CodexService()
         let error = CodexServiceError.invalidInput(
             "Connection timed out after 12s while opening the direct relay socket."
+        )
+
+        XCTAssertTrue(service.isRecoverableTransientConnectionError(error))
+        XCTAssertEqual(
+            service.userFacingConnectFailureMessage(error),
+            "Connection timed out. Check server/network."
+        )
+    }
+
+    func testSecureHandshakeTimeoutRemainsRetryable() {
+        let service = CodexService()
+        let error = CodexSecureTransportError.timedOut(
+            "Timed out waiting for the secure Remodex serverHello message."
         )
 
         XCTAssertTrue(service.isRecoverableTransientConnectionError(error))

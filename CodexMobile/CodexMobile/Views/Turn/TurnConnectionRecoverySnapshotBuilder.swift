@@ -26,40 +26,39 @@ enum TurnConnectionRecoverySnapshotBuilder {
 
         let trimmedError = lastErrorMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        if isWakingMacDisplayRecovery {
-            return ConnectionRecoverySnapshot(
-                summary: trimmedError?.isEmpty == false
-                    ? trimmedError ?? ""
-                    : "Trying to wake the computer display.",
-                status: .reconnecting,
-                trailingStyle: .progress
-            )
-        }
-
-        // While foreground auto-recovery is still running, keep the card in progress
-        // instead of surfacing the manual wake fallback on every app switch.
-        if isConnecting || shouldAutoReconnectOnForeground || isRetryingConnectionRecovery {
-            return ConnectionRecoverySnapshot(
-                summary: "Trying to reconnect to your computer.",
-                status: .reconnecting,
-                trailingStyle: .progress
-            )
-        }
-
+        // Once the silent wake attempt has already failed, prefer the explicit wake fallback over passive retry copy.
         if showsWakeSavedMacDisplayAction {
             return ConnectionRecoverySnapshot(
                 summary: trimmedError?.isEmpty == false
                     ? trimmedError ?? ""
-                    : "Your computer is not reachable, so this chat is paused.",
+                    : "Wake your Mac screen to keep this chat in sync.",
                 status: .interrupted,
                 trailingStyle: .action("Wake Screen")
+            )
+        }
+
+        if isWakingMacDisplayRecovery {
+            return ConnectionRecoverySnapshot(
+                summary: trimmedError?.isEmpty == false
+                    ? trimmedError ?? ""
+                    : "Trying to wake your Mac display.",
+                status: .reconnecting,
+                trailingStyle: .progress
+            )
+        }
+
+        if isConnecting || shouldAutoReconnectOnForeground || isRetryingConnectionRecovery {
+            return ConnectionRecoverySnapshot(
+                summary: "Trying to reconnect to your Mac.",
+                status: .reconnecting,
+                trailingStyle: .progress
             )
         }
 
         return ConnectionRecoverySnapshot(
             summary: trimmedError?.isEmpty == false
                 ? trimmedError ?? ""
-                : "Reconnect to your computer to keep this chat in sync.",
+                : "Reconnect to your Mac to keep this chat in sync.",
             status: .interrupted,
             trailingStyle: .action("Reconnect")
         )

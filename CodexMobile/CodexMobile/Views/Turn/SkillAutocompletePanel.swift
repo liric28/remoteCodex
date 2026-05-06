@@ -49,12 +49,12 @@ struct SkillAutocompletePanel: View {
                                     HStack(spacing: 8) {
                                         Text(SkillDisplayNameFormatter.displayName(for: skill.name))
                                             .font(AppFont.subheadline(weight: .semibold))
-                                            .foregroundStyle(Color.indigo)
+                                            .foregroundStyle(.primary)
                                             .lineLimit(1)
 
                                         Spacer(minLength: 8)
 
-                                        Text(skill.name)
+                                        Text("$\(skill.name)")
                                             .font(AppFont.footnote())
                                             .foregroundStyle(.secondary)
                                             .lineLimit(1)

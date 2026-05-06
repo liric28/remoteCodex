@@ -9,6 +9,19 @@ import Foundation
 import Security
 
 extension CodexService {
+    // When the trusted target changes from one Mac to another under the same relay,
+    // reset visible thread state before the new bridge snapshot arrives.
+    private func resetThreadRuntimeStateForMacSwitchIfNeeded(nextMacDeviceId: String?) {
+        guard let trimmedNextMacDeviceId = nextMacDeviceId?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmedNextMacDeviceId.isEmpty,
+              let currentMacDeviceId = normalizedRelayMacDeviceId,
+              currentMacDeviceId != trimmedNextMacDeviceId else {
+            return
+        }
+
+        resetThreadRuntimeStateForServerSwitch()
+    }
+
     // Completes the secure handshake before any JSON-RPC traffic is sent over the relay.
     func performSecureHandshake() async throws {
         guard let sessionId = normalizedRelaySessionId,
@@ -70,7 +83,7 @@ extension CodexService {
         )
         guard serverHello.protocolVersion == codexSecureProtocolVersion else {
             presentBridgeUpdatePrompt(
-                message: "This bridge is using a different secure transport version. Update the Remodex package on your computer and try again."
+                message: "This bridge is using a different secure transport version. Update the Remodex package on your Mac and try again."
             )
             throw CodexSecureTransportError.incompatibleVersion(
                 "This bridge is using a different secure transport version. Update Remodex on the iPhone or Mac and try again."
@@ -258,6 +271,7 @@ extension CodexService {
 
     // Saves the QR-derived bridge metadata used for secure reconnects.
     func rememberRelayPairing(_ payload: CodexPairingQRPayload) {
+        resetThreadRuntimeStateForMacSwitchIfNeeded(nextMacDeviceId: payload.macDeviceId)
         SecureStore.writeString(payload.sessionId, for: CodexSecureKeys.relaySessionId)
         SecureStore.writeString(payload.relay, for: CodexSecureKeys.relayUrl)
         SecureStore.writeString(payload.macDeviceId, for: CodexSecureKeys.relayMacDeviceId)
@@ -274,6 +288,7 @@ extension CodexService {
         trustedReconnectFailureCount = 0
         secureConnectionState = trustedMacRegistry.records[payload.macDeviceId] == nil ? .handshaking : .trustedMac
         secureMacFingerprint = codexSecureFingerprint(for: payload.macIdentityPublicKey)
+        rememberTrustedRelayCandidate(for: payload.macDeviceId, relayURL: payload.relay)
     }
 
     // Resets volatile secure state while preserving the trusted-device registry.
@@ -426,9 +441,9 @@ extension CodexService {
         let errorResponse = try? JSONDecoder().decode(CodexRelayErrorResponse.self, from: data)
         switch errorResponse?.code {
         case "pairing_code_expired":
-            throw CodexSecureTransportError.invalidQR("This pairing code has expired. Generate a new one from the computer bridge.")
+            throw CodexSecureTransportError.invalidQR("This pairing code has expired. Generate a new one from the Mac bridge.")
         case "pairing_code_unavailable":
-            throw CodexSecureTransportError.invalidQR("That pairing code is not available right now. Make sure your computer bridge is running and try again.")
+            throw CodexSecureTransportError.invalidQR("That pairing code is not available right now. Make sure your Mac bridge is running and try again.")
         default:
             if httpResponse.statusCode == 404 {
                 throw CodexSecureTransportError.invalidQR("This relay does not support pairing codes yet. Scan the QR code instead.")
@@ -440,55 +455,11 @@ extension CodexService {
     }
 }
 
-enum CodexTrustedSessionResolveURLBuilder {
-    // Builds both proxy-relative and root HTTP resolve routes from the remembered WebSocket relay URL.
-    static func candidates(from relayURL: String) -> [URL] {
-        guard var components = URLComponents(string: relayURL) else {
-            return []
-        }
-
-        normalizeRelayResolveComponents(&components)
-
-        var candidates: [URL] = []
-        let pathComponents = components.path.split(separator: "/").map(String.init)
-        if pathComponents.last == "relay" {
-            let prefix = pathComponents.dropLast()
-            components.path = "/" + (prefix + ["v1", "trusted", "session", "resolve"]).joined(separator: "/")
-        } else {
-            components.path = "/v1/trusted/session/resolve"
-        }
-        if let url = components.url {
-            candidates.append(url)
-        }
-
-        if var rootComponents = URLComponents(string: relayURL) {
-            normalizeRelayResolveComponents(&rootComponents)
-            rootComponents.path = "/v1/trusted/session/resolve"
-            if let rootURL = rootComponents.url,
-               !candidates.contains(where: { $0.absoluteString == rootURL.absoluteString }) {
-                candidates.append(rootURL)
-            }
-        }
-
-        return candidates
-    }
-
-    private static func normalizeRelayResolveComponents(_ components: inout URLComponents) {
-        if components.scheme == "wss" {
-            components.scheme = "https"
-        } else if components.scheme == "ws" {
-            components.scheme = "http"
-        }
-        components.query = nil
-        components.fragment = nil
-    }
-}
-
 private extension CodexService {
     // Centralizes the bridge-update guidance so every mismatch shows the same Mac command.
     func presentBridgeUpdatePrompt(message: String) {
         bridgeUpdatePrompt = CodexBridgeUpdatePrompt(
-            title: "Update the Remodex package on your computer",
+            title: "Update the Remodex package on your Mac",
             message: message,
             command: "npm install -g remodex@latest"
         )
@@ -646,16 +617,20 @@ private extension CodexService {
 
     func trustMac(deviceId: String, publicKey: String, relayURL: String?, displayName: String?) {
         let existing = trustedMacRegistry.records[deviceId]
-        trustedMacRegistry.records[deviceId] = CodexTrustedMacRecord(
+        var nextRecord = CodexTrustedMacRecord(
             macDeviceId: deviceId,
             macIdentityPublicKey: publicKey,
             lastPairedAt: Date(),
             relayURL: relayURL ?? existing?.relayURL,
+            persistentRelayURL: existing?.persistentRelayURL,
+            localRelayURL: existing?.localRelayURL,
             displayName: displayName ?? existing?.displayName,
             lastResolvedSessionId: existing?.lastResolvedSessionId,
             lastResolvedAt: existing?.lastResolvedAt,
             lastUsedAt: Date()
         )
+        updateRelaySlots(on: &nextRecord, with: relayURL)
+        trustedMacRegistry.records[deviceId] = nextRecord
         SecureStore.writeCodable(trustedMacRegistry, for: CodexSecureKeys.trustedMacRegistry)
         SecureStore.writeString(deviceId, for: CodexSecureKeys.lastTrustedMacDeviceId)
         lastTrustedMacDeviceId = deviceId
@@ -666,39 +641,14 @@ private extension CodexService {
         guard let trustedMac = preferredTrustedMacRecord else {
             throw CodexTrustedSessionResolveError.noTrustedMac
         }
-        guard let relayURL = trustedMac.relayURL?.trimmingCharacters(in: .whitespacesAndNewlines),
+        guard let relayURL = preferredRelayURL(for: trustedMac),
               !relayURL.isEmpty else {
             throw CodexTrustedSessionResolveError.noTrustedMac
         }
-        let resolveURLs = CodexTrustedSessionResolveURLBuilder.candidates(from: relayURL)
-        guard !resolveURLs.isEmpty else {
-            throw CodexTrustedSessionResolveError.invalidResponse("The trusted computer relay URL is invalid.")
+        guard let resolveURL = trustedSessionResolveURL(from: relayURL) else {
+            throw CodexTrustedSessionResolveError.invalidResponse("The trusted Mac relay URL is invalid.")
         }
 
-        var lastRetriableResolveError: CodexTrustedSessionResolveError?
-        for (index, resolveURL) in resolveURLs.enumerated() {
-            do {
-                return try await sendTrustedSessionResolveRequest(
-                    makeTrustedSessionResolveRequestBody(for: trustedMac),
-                    resolveURL: resolveURL,
-                    relayURL: relayURL
-                )
-            } catch let error as CodexTrustedSessionResolveError {
-                guard shouldTryNextTrustedResolveCandidate(after: error),
-                      index < resolveURLs.count - 1 else {
-                    throw error
-                }
-                lastRetriableResolveError = error
-                continue
-            }
-        }
-
-        throw lastRetriableResolveError ?? CodexTrustedSessionResolveError.unsupportedRelay
-    }
-
-    private func makeTrustedSessionResolveRequestBody(
-        for trustedMac: CodexTrustedMacRecord
-    ) throws -> CodexTrustedSessionResolveRequest {
         let nonce = UUID().uuidString
         let timestamp = Int64(Date().timeIntervalSince1970 * 1_000)
         let transcriptBytes = codexTrustedSessionResolveTranscriptBytes(
@@ -713,7 +663,7 @@ private extension CodexService {
         )
         let signature = try phonePrivateKey.signature(for: transcriptBytes).base64EncodedString()
 
-        return CodexTrustedSessionResolveRequest(
+        let requestBody = CodexTrustedSessionResolveRequest(
             macDeviceId: trustedMac.macDeviceId,
             phoneDeviceId: phoneIdentityState.phoneDeviceId,
             phoneIdentityPublicKey: phoneIdentityState.phoneIdentityPublicKey,
@@ -721,22 +671,7 @@ private extension CodexService {
             timestamp: timestamp,
             signature: signature
         )
-    }
 
-    private func shouldTryNextTrustedResolveCandidate(after error: CodexTrustedSessionResolveError) -> Bool {
-        switch error {
-        case .unsupportedRelay, .invalidResponse, .network:
-            return true
-        case .macOffline, .rePairRequired, .noTrustedMac:
-            return false
-        }
-    }
-
-    private func sendTrustedSessionResolveRequest(
-        _ requestBody: CodexTrustedSessionResolveRequest,
-        resolveURL: URL,
-        relayURL: String
-    ) async throws -> CodexTrustedSessionResolveResponse {
         var request = URLRequest(url: resolveURL)
         request.httpMethod = "POST"
         request.timeoutInterval = 8
@@ -758,17 +693,17 @@ private extension CodexService {
                 || (nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled) {
                 throw CancellationError()
             }
-            throw CodexTrustedSessionResolveError.network("Could not reach the trusted computer relay. Check your connection and try again.")
+            throw CodexTrustedSessionResolveError.network("Could not reach the trusted Mac relay. Check your connection and try again.")
         }
 
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw CodexTrustedSessionResolveError.invalidResponse("The trusted computer relay returned an invalid response.")
+            throw CodexTrustedSessionResolveError.invalidResponse("The trusted Mac relay returned an invalid response.")
         }
 
         if (200..<300).contains(httpResponse.statusCode) {
             guard let resolved = try? JSONDecoder().decode(CodexTrustedSessionResolveResponse.self, from: data),
                   resolved.ok else {
-                throw CodexTrustedSessionResolveError.invalidResponse("The trusted computer relay returned malformed session data.")
+                throw CodexTrustedSessionResolveError.invalidResponse("The trusted Mac relay returned malformed session data.")
             }
             applyResolvedTrustedSession(resolved, relayURL: relayURL)
             return resolved
@@ -778,11 +713,11 @@ private extension CodexService {
         switch errorResponse?.code {
         case "session_unavailable":
             secureConnectionState = .liveSessionUnresolved
-            throw CodexTrustedSessionResolveError.macOffline("Your trusted computer is offline right now.")
+            throw CodexTrustedSessionResolveError.macOffline("Your trusted Mac is offline right now.")
         case "phone_not_trusted", "invalid_signature":
             secureConnectionState = .rePairRequired
             throw CodexTrustedSessionResolveError.rePairRequired(
-                "This iPhone is no longer trusted by the paired computer. Scan a new QR code to reconnect."
+                "This iPhone is no longer trusted by the Mac. Scan a new QR code to reconnect."
             )
         case "resolve_request_replayed", "resolve_request_expired":
             throw CodexTrustedSessionResolveError.network(
@@ -794,12 +729,13 @@ private extension CodexService {
             }
             throw CodexTrustedSessionResolveError.network(
                 errorResponse?.error
-                ?? "The trusted computer relay could not resolve the current bridge session."
+                ?? "The trusted Mac relay could not resolve the current bridge session."
             )
         }
     }
 
     private func rememberResolvedTrustedSession(_ resolved: CodexTrustedSessionResolveResponse, relayURL: String) {
+        resetThreadRuntimeStateForMacSwitchIfNeeded(nextMacDeviceId: resolved.macDeviceId)
         SecureStore.writeString(resolved.sessionId, for: CodexSecureKeys.relaySessionId)
         SecureStore.writeString(relayURL, for: CodexSecureKeys.relayUrl)
         SecureStore.writeString(resolved.macDeviceId, for: CodexSecureKeys.relayMacDeviceId)
@@ -819,6 +755,7 @@ private extension CodexService {
 
         if var trustedMac = trustedMacRegistry.records[resolved.macDeviceId] {
             trustedMac.relayURL = relayURL
+            updateRelaySlots(on: &trustedMac, with: relayURL)
             trustedMac.displayName = resolved.displayName ?? trustedMac.displayName
             trustedMac.lastResolvedSessionId = resolved.sessionId
             trustedMac.lastResolvedAt = Date()
@@ -828,12 +765,33 @@ private extension CodexService {
         }
     }
 
+    private func trustedSessionResolveURL(from relayURL: String) -> URL? {
+        guard var components = URLComponents(string: relayURL) else {
+            return nil
+        }
+
+        if components.scheme == "wss" {
+            components.scheme = "https"
+        } else if components.scheme == "ws" {
+            components.scheme = "http"
+        }
+
+        let pathComponents = components.path.split(separator: "/").map(String.init)
+        if pathComponents.last == "relay" {
+            let prefix = pathComponents.dropLast()
+            components.path = "/" + (prefix + ["v1", "trusted", "session", "resolve"]).joined(separator: "/")
+        } else {
+            components.path = "/v1/trusted/session/resolve"
+        }
+
+        return components.url
+    }
+
     private var preferredPairingCodeRelayURL: String? {
         if let normalizedRelayURL {
             return normalizedRelayURL
         }
-        if let trustedRelayURL = preferredTrustedMacRecord?.relayURL?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !trustedRelayURL.isEmpty {
+        if let trustedRelayURL = preferredTrustedReconnectRelayURL {
             return trustedRelayURL
         }
         let defaultRelayURL = AppEnvironment.relayBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -876,6 +834,31 @@ private extension CodexService {
         }
 
         return URLSession(configuration: configuration)
+    }
+
+    func rememberTrustedRelayCandidate(for macDeviceId: String, relayURL: String?) {
+        guard var trustedMac = trustedMacRegistry.records[macDeviceId] else {
+            return
+        }
+
+        updateRelaySlots(on: &trustedMac, with: relayURL)
+        trustedMac.lastUsedAt = Date()
+        trustedMacRegistry.records[macDeviceId] = trustedMac
+        SecureStore.writeCodable(trustedMacRegistry, for: CodexSecureKeys.trustedMacRegistry)
+    }
+
+    func updateRelaySlots(on trustedMac: inout CodexTrustedMacRecord, with relayURL: String?) {
+        guard let relayURL = relayURL?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !relayURL.isEmpty else {
+            return
+        }
+
+        trustedMac.relayURL = relayURL
+        if relayRequiresSharedLocalNetwork(relayURL) {
+            trustedMac.localRelayURL = relayURL
+        } else {
+            trustedMac.persistentRelayURL = relayURL
+        }
     }
 
     /// Waits for a serverHello whose echoed clientNonce matches the one we sent.

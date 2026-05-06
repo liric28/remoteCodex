@@ -36,6 +36,7 @@ struct TurnComposerSecondaryBar: View {
     let onSelectGitBaseBranch: (String) -> Void
     let onRefreshGitBranches: () -> Void
     let onRefreshUsageStatus: () async -> Void
+    let onRefreshAccount: () async -> Void
     let onSelectAccessMode: (CodexAccessMode) -> Void
     let canHandOffToWorktree: Bool
     let onTapCreateWorktree: () -> Void
@@ -51,6 +52,9 @@ struct TurnComposerSecondaryBar: View {
             if !isInputFocused {
                 HStack(spacing: 8) {
                     runtimePicker
+
+                    accessMenuLabel
+                    Spacer()
 
                     if showsGitBranchSelector {
                         TurnGitBranchSelector(
@@ -68,12 +72,8 @@ struct TurnComposerSecondaryBar: View {
                             onSelectGitBaseBranch: onSelectGitBaseBranch,
                             onRefreshGitBranches: onRefreshGitBranches
                         )
-                        .equatable()
                     }
 
-                    Spacer()
-
-                    accessMenuLabel
                     statusControlCircle
                 }
 
@@ -101,8 +101,8 @@ struct TurnComposerSecondaryBar: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: selectedAccessMode == .fullAccess
-                      ? "hand.thumbsup"
-                      : "hand.raised")
+                      ? "exclamationmark.shield"
+                      : "checkmark.shield")
                     .font(branchTextFont)
 
                 Image(systemName: "chevron.down")
@@ -110,7 +110,7 @@ struct TurnComposerSecondaryBar: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .adaptiveGlass(.regular, in: Capsule())
+            .adaptiveGlass(.toolbarControl, in: Capsule())
             .foregroundStyle(branchLabelColor)
             .contentShape(Capsule())
         }
@@ -171,7 +171,7 @@ struct TurnComposerSecondaryBar: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .adaptiveGlass(.regular, in: Capsule())
+            .adaptiveGlass(.toolbarControl, in: Capsule())
             .foregroundStyle(branchLabelColor)
             .contentShape(Capsule())
         }
@@ -185,7 +185,8 @@ struct TurnComposerSecondaryBar: View {
             isLoadingRateLimits: isLoadingRateLimits,
             rateLimitsErrorMessage: rateLimitsErrorMessage,
             shouldAutoRefreshStatus: shouldAutoRefreshUsageStatus,
-            onRefreshStatus: onRefreshUsageStatus
+            onRefreshStatus: onRefreshUsageStatus,
+            onRefreshAccount: onRefreshAccount
         )
     }
 }

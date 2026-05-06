@@ -170,6 +170,135 @@ final class CodexThreadProjectRoutingTests: XCTestCase {
         XCTAssertEqual(service.associatedManagedWorktreePath(for: "thread-1"), worktreePath)
     }
 
+    func testStartTurnRebindsExistingThreadBeforeResumeWhenInputContainsCdDirective() async throws {
+        let service = makeService()
+        let originalPath = "/Users/lipan"
+        let switchedPath = "/Users/lipan/Desktop/lil-agents-clean-project"
+        service.upsertThread(
+            CodexThread(
+                id: "thread-1",
+                title: "Source",
+                cwd: originalPath
+            )
+        )
+        service.activeThreadId = "thread-1"
+
+        var resumedPaths: [String] = []
+        var startedTurnThreadID: String?
+        service.requestTransportOverride = { method, params in
+            switch method {
+            case "thread/resume":
+                let cwd = params?.objectValue?["cwd"]?.stringValue ?? ""
+                resumedPaths.append(cwd)
+                return RPCMessage(
+                    id: .string(UUID().uuidString),
+                    result: .object([
+                        "thread": .object([
+                            "id": .string("thread-1"),
+                            "cwd": .string(cwd),
+                            "title": .string("Source"),
+                        ]),
+                    ]),
+                    includeJSONRPC: false
+                )
+            case "turn/start":
+                startedTurnThreadID = params?.objectValue?["threadId"]?.stringValue
+                return RPCMessage(
+                    id: .string(UUID().uuidString),
+                    result: .object([
+                        "turn": .object([
+                            "id": .string("turn-1"),
+                            "status": .string("inProgress"),
+                            "items": .array([]),
+                            "error": .null,
+                        ]),
+                    ]),
+                    includeJSONRPC: false
+                )
+            default:
+                XCTFail("Unexpected method: \(method)")
+                return RPCMessage(id: .string(UUID().uuidString), result: .object([:]), includeJSONRPC: false)
+            }
+        }
+
+        try await service.startTurn(
+            userInput: "cd /Users/lipan/Desktop/lil-agents-clean-project",
+            threadId: "thread-1",
+            shouldAppendUserMessage: false
+        )
+
+        XCTAssertEqual(resumedPaths, [switchedPath])
+        XCTAssertEqual(startedTurnThreadID, "thread-1")
+        XCTAssertEqual(service.thread(for: "thread-1")?.gitWorkingDirectory, switchedPath)
+    }
+
+    func testStartTurnCreatesThreadInSwitchedProjectWhenInputContainsChineseDirectoryDirective() async throws {
+        let service = makeService()
+        let switchedPath = "/Users/lipan/Desktop/lil-agents-clean-project"
+
+        var startedThreadPaths: [String] = []
+        var resumedPaths: [String] = []
+        service.requestTransportOverride = { method, params in
+            switch method {
+            case "thread/start":
+                let cwd = params?.objectValue?["cwd"]?.stringValue ?? ""
+                startedThreadPaths.append(cwd)
+                return RPCMessage(
+                    id: .string(UUID().uuidString),
+                    result: .object([
+                        "thread": .object([
+                            "id": .string("thread-2"),
+                            "title": .string("Source"),
+                            "cwd": .string(cwd),
+                        ]),
+                    ]),
+                    includeJSONRPC: false
+                )
+            case "thread/resume":
+                let cwd = params?.objectValue?["cwd"]?.stringValue ?? ""
+                resumedPaths.append(cwd)
+                return RPCMessage(
+                    id: .string(UUID().uuidString),
+                    result: .object([
+                        "thread": .object([
+                            "id": .string("thread-2"),
+                            "cwd": .string(cwd),
+                            "title": .string("Source"),
+                        ]),
+                    ]),
+                    includeJSONRPC: false
+                )
+            case "turn/start":
+                return RPCMessage(
+                    id: .string(UUID().uuidString),
+                    result: .object([
+                        "turn": .object([
+                            "id": .string("turn-2"),
+                            "status": .string("inProgress"),
+                            "items": .array([]),
+                            "error": .null,
+                        ]),
+                    ]),
+                    includeJSONRPC: false
+                )
+            default:
+                XCTFail("Unexpected method: \(method)")
+                return RPCMessage(id: .string(UUID().uuidString), result: .object([:]), includeJSONRPC: false)
+            }
+        }
+
+        try await service.startTurn(
+            userInput: "进入 /Users/lipan/Desktop/lil-agents-clean-project 目录",
+            threadId: nil,
+            shouldAppendUserMessage: false
+        )
+
+        XCTAssertEqual(startedThreadPaths, [switchedPath])
+        XCTAssertEqual(resumedPaths, [switchedPath])
+        XCTAssertEqual(service.activeThreadId, "thread-2")
+        XCTAssertEqual(service.thread(for: "thread-2")?.gitWorkingDirectory, switchedPath)
+    }
+
     private func makeService(defaults: UserDefaults? = nil) -> CodexService {
         let resolvedDefaults: UserDefaults
         if let defaults {

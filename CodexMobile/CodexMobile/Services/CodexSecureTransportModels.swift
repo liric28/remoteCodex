@@ -51,6 +51,8 @@ struct CodexTrustedMacRecord: Codable, Sendable {
     let macIdentityPublicKey: String
     let lastPairedAt: Date
     var relayURL: String? = nil
+    var persistentRelayURL: String? = nil
+    var localRelayURL: String? = nil
     var displayName: String? = nil
     var lastResolvedSessionId: String? = nil
     var lastResolvedAt: Date? = nil
@@ -217,7 +219,7 @@ enum CodexTrustedSessionResolveError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .noTrustedMac:
-            return "No trusted computer is available to reconnect."
+            return "No trusted Mac is available to reconnect."
         case .unsupportedRelay:
             return "This relay does not support trusted reconnect yet."
         case .macOffline(let message),
@@ -235,9 +237,9 @@ extension CodexSecureConnectionState {
         case .notPaired:
             return "Not paired"
         case .trustedMac:
-            return "Trusted Computer"
+            return "Trusted Mac"
         case .liveSessionUnresolved:
-            return "Trusted Computer ready"
+            return "Trusted Mac ready"
         case .handshaking:
             return "Secure handshake in progress"
         case .encrypted:

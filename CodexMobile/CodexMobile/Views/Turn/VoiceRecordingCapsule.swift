@@ -176,7 +176,7 @@ private struct VoiceRecordingCapsulePreview: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
 
-                Text("Ask anything... @plugins, $skills, /commands")
+                Text("Ask anything... @files, $skills, /commands")
                     .font(AppFont.body())
                     .foregroundStyle(Color(.placeholderText))
                     .frame(maxWidth: .infinity, alignment: .leading)

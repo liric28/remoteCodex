@@ -68,9 +68,7 @@ enum TurnTimelineReducer {
                 // Steer can append a later user row into the still-active turn before the
                 // assistant emits another distinct item. Preserve chronology so that user
                 // prompt stays visible near the tail instead of jumping to the turn start.
-                sorted = movingFileChangesToTurnTail(
-                    in: turnMessages.sorted { $0.orderIndex < $1.orderIndex }
-                )
+                sorted = turnMessages.sorted { $0.orderIndex < $1.orderIndex }
             } else if hasInterleavedAssistantActivityFlow(turnMessages) {
                 // Multi-item turn: keep the streamed interleaving intact. If the turn has
                 // only one user prompt, we can still float that original opener forward.
@@ -88,20 +86,19 @@ enum TurnTimelineReducer {
                         .id
                     : nil
 
-                let chronological = turnMessages.sorted { a, b in
+                sorted = turnMessages.sorted { a, b in
                     let aIsOpeningUser = openingUserID != nil && a.id == openingUserID
                     let bIsOpeningUser = openingUserID != nil && b.id == openingUserID
                     if aIsOpeningUser != bIsOpeningUser { return aIsOpeningUser }
                     return a.orderIndex < b.orderIndex
                 }
-                sorted = movingFileChangesToTurnTail(in: chronological)
             } else {
                 // Single-item turn: apply normal role-based ordering.
                 sorted = turnMessages.sorted { a, b in
                     let pA = intraTurnPriority(a)
                     let pB = intraTurnPriority(b)
                     if pA != pB { return pA < pB }
-                    return intraTurnTieBreak(a, b)
+                    return a.orderIndex < b.orderIndex
                 }
             }
 
@@ -137,23 +134,13 @@ enum TurnTimelineReducer {
     // assistant message (thinking/tool → response → thinking/tool). This distinguishes true
     // interleaved flows from single-item turns where events arrived out of order.
     private static func hasInterleavedAssistantActivityFlow(_ turnMessages: [CodexMessage]) -> Bool {
-        // Distinct assistant items with distinct text are real multi-message turns, but
-        // file-change cards still need semantic trailing placement after the final answer.
-        var distinctAssistantTexts: Set<String> = []
-        var distinctAssistantItemIDs: Set<String> = []
-        for message in turnMessages where message.role == .assistant {
-            let text = normalizedMessageText(message.text)
-            if !text.isEmpty {
-                distinctAssistantTexts.insert(text)
-            }
-            if let itemID = normalizedIdentifier(message.itemId) {
-                distinctAssistantItemIDs.insert(itemID)
-            }
-        }
-        let hasFileChangeCard = turnMessages.contains { $0.role == .system && $0.kind == .fileChange }
-        if !hasFileChangeCard,
-           distinctAssistantTexts.count > 1,
-           distinctAssistantItemIDs.count > 1 {
+        // Multiple distinct assistant item IDs = definitive multi-item turn.
+        let distinctAssistantItemIds = Set(
+            turnMessages
+                .filter { $0.role == .assistant }
+                .compactMap { normalizedIdentifier($0.itemId) }
+        )
+        if distinctAssistantItemIds.count > 1 {
             return true
         }
 
@@ -173,18 +160,6 @@ enum TurnTimelineReducer {
             }
         }
         return false
-    }
-
-    // Mac-started rollout mirrors can interleave many assistant/tool rows before the
-    // final answer; edited-file cards are still turn-end artifacts and must trail it.
-    private static func movingFileChangesToTurnTail(in messages: [CodexMessage]) -> [CodexMessage] {
-        guard messages.contains(where: { $0.role == .system && $0.kind == .fileChange }) else {
-            return messages
-        }
-
-        let nonFileChanges = messages.filter { !($0.role == .system && $0.kind == .fileChange) }
-        let fileChanges = messages.filter { $0.role == .system && $0.kind == .fileChange }
-        return nonFileChanges + fileChanges
     }
 
     private static func isInterleavableSystemActivity(_ message: CodexMessage) -> Bool {
@@ -229,20 +204,6 @@ enum TurnTimelineReducer {
         }
     }
 
-    // Late terminal replays can arrive with a newer raw order index; stable closed assistant
-    // rows should still render by their semantic creation time inside one turn.
-    private static func intraTurnTieBreak(_ a: CodexMessage, _ b: CodexMessage) -> Bool {
-        if a.role == .assistant,
-           b.role == .assistant,
-           !a.isStreaming,
-           !b.isStreaming,
-           a.createdAt != b.createdAt {
-            return a.createdAt < b.createdAt
-        }
-
-        return a.orderIndex < b.orderIndex
-    }
-
     // Hides persisted technical markers that exist only to reset per-chat diff totals.
     private static func removeHiddenSystemMarkers(in messages: [CodexMessage]) -> [CodexMessage] {
         messages.filter { message in
@@ -251,7 +212,7 @@ enum TurnTimelineReducer {
     }
 
     // Collapses repeated thinking placeholders/activity rows within one turn segment so
-    // tool cards can interleave without leaving stacked empty thinking rows behind.
+    // tool cards can interleave without leaving stacked empty "Thinking..." rows behind.
     static func collapseThinkingMessages(in messages: [CodexMessage]) -> [CodexMessage] {
         var result: [CodexMessage] = []
         result.reserveCapacity(messages.count)
@@ -553,15 +514,6 @@ enum TurnTimelineReducer {
             return false
         }
 
-        // Stale image pending rows from older sessions should still collapse when
-        // the runtime echo finally supplies the turn binding.
-        if isPendingToConfirmedUpgrade,
-           isTurnBindingUpgrade,
-           !previous.attachments.isEmpty,
-           previous.attachments.count == incoming.attachments.count {
-            return true
-        }
-
         return abs(incoming.createdAt.timeIntervalSince(previous.createdAt)) <= 12
     }
 
@@ -624,9 +576,7 @@ enum TurnTimelineReducer {
         if !previousAttachments.isEmpty,
            !incomingAttachments.isEmpty,
            previousAttachments != incomingAttachments {
-            // Render dedupe mirrors history reconciliation for optimistic image sends
-            // whose confirmed echo has a different attachment storage identity.
-            return previous.attachments.count == incoming.attachments.count
+            return false
         }
 
         return true
@@ -652,39 +602,7 @@ enum TurnTimelineReducer {
                 continue
             }
 
-            if isAssistantBlockReplay(in: result, incoming: message) {
-                continue
-            }
-
             if let turnId = message.turnId, !turnId.isEmpty {
-                if let exactReplayIndex = result.indices.reversed().first(where: {
-                    shouldMergeExactAssistantReplay(previous: result[$0], incoming: message)
-                }) {
-                    result[exactReplayIndex] = mergedExactAssistantReplay(
-                        previous: result[exactReplayIndex],
-                        incoming: message
-                    )
-                    continue
-                }
-
-                if let replayIndex = result.indices.reversed().first(where: {
-                    shouldMergeAssistantReplay(previous: result[$0], incoming: message)
-                }) {
-                    let previousText = result[replayIndex].text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if previousText.count >= normalizedText.count || previousText.contains(normalizedText) {
-                        continue
-                    }
-
-                    var merged = result[replayIndex]
-                    merged.text = message.text
-                    merged.isStreaming = message.isStreaming
-                    if merged.itemId == nil {
-                        merged.itemId = message.itemId
-                    }
-                    result[replayIndex] = merged
-                    continue
-                }
-
                 let dedupeScope = normalizedIdentifier(message.itemId)
                 let key = "\(turnId)|\(dedupeScope ?? "no-item")|\(normalizedText)"
                 if seenKeys.contains(key) {
@@ -722,85 +640,6 @@ enum TurnTimelineReducer {
     private struct AssistantTurnTextObservation {
         let createdAt: Date
         let hasStableIdentity: Bool
-    }
-
-    // Folds duplicate final-answer items even when history/live replay assigned different stable item ids.
-    private static func shouldMergeExactAssistantReplay(previous: CodexMessage, incoming: CodexMessage) -> Bool {
-        guard previous.role == .assistant,
-              incoming.role == .assistant,
-              previous.threadId == incoming.threadId,
-              normalizedIdentifier(previous.turnId) == normalizedIdentifier(incoming.turnId) else {
-            return false
-        }
-
-        let previousText = normalizedMessageText(previous.text)
-        let incomingText = normalizedMessageText(incoming.text)
-        guard previousText.count >= 24,
-              previousText == incomingText else {
-            return false
-        }
-
-        return true
-    }
-
-    private static func mergedExactAssistantReplay(previous: CodexMessage, incoming: CodexMessage) -> CodexMessage {
-        var merged = previous
-        merged.isStreaming = previous.isStreaming && incoming.isStreaming
-        if merged.turnId == nil {
-            merged.turnId = incoming.turnId
-        }
-        if normalizedIdentifier(merged.itemId) == nil || isProvisionalAssistantIdentity(merged.itemId) {
-            merged.itemId = incoming.itemId ?? merged.itemId
-        }
-        if incoming.text.count > merged.text.count {
-            merged.text = incoming.text
-        }
-        return merged
-    }
-
-    // Collapses persisted replay rows where a late delta duplicated part of the final answer.
-    private static func shouldMergeAssistantReplay(previous: CodexMessage, incoming: CodexMessage) -> Bool {
-        guard previous.role == .assistant,
-              incoming.role == .assistant,
-              previous.threadId == incoming.threadId,
-              normalizedIdentifier(previous.turnId) == normalizedIdentifier(incoming.turnId) else {
-            return false
-        }
-
-        let previousItemId = normalizedIdentifier(previous.itemId)
-        let incomingItemId = normalizedIdentifier(incoming.itemId)
-        if let previousItemId, let incomingItemId, previousItemId != incomingItemId {
-            return false
-        }
-        guard isProvisionalAssistantIdentity(previousItemId) || isProvisionalAssistantIdentity(incomingItemId) else {
-            return false
-        }
-
-        let previousText = previous.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let incomingText = incoming.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard min(previousText.count, incomingText.count) >= 24 else {
-            return false
-        }
-
-        return previousText.contains(incomingText) || incomingText.contains(previousText)
-    }
-
-    // Detects final-completion replays that resend all prior assistant rows for a turn.
-    private static func isAssistantBlockReplay(in messages: [CodexMessage], incoming: CodexMessage) -> Bool {
-        AssistantReplayDeduper.isReplayMessage(
-            in: messages,
-            threadId: incoming.threadId,
-            turnId: incoming.turnId,
-            text: incoming.text,
-            excludingMessageID: incoming.id
-        )
-    }
-
-    private static func isProvisionalAssistantIdentity(_ itemId: String?) -> Bool {
-        guard let itemId else {
-            return true
-        }
-        return itemId.hasPrefix("turn:") || itemId.hasPrefix("rollout-")
     }
 
     // Keeps only the newest matching file-change card when multiple event channels emit the same diff.

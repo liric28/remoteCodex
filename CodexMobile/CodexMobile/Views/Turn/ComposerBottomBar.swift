@@ -1,5 +1,5 @@
 // FILE: ComposerBottomBar.swift
-// Purpose: Bottom bar with attachment/runtime/access menus, queue controls, and send button.
+// Purpose: Bottom bar with attachment/model/reasoning/access menus, queue controls, and send button.
 // Layer: View Component
 // Exports: ComposerBottomBar
 // Depends on: SwiftUI, TurnComposerMetaMapper
@@ -8,20 +8,17 @@ import SwiftUI
 
 struct ComposerBottomBar: View {
     @Environment(\.colorScheme) private var colorScheme
-    @State private var showsAllModelsSheet = false
 
     // Data
     let orderedModelOptions: [CodexModelOption]
     let selectedModelID: String?
     let selectedModelTitle: String
     let isLoadingModels: Bool
-    let isRuntimeSelectionLoading: Bool
     let runtimeState: TurnComposerRuntimeState
     let runtimeActions: TurnComposerRuntimeActions
     let remainingAttachmentSlots: Int
     let isComposerInteractionLocked: Bool
     let isSendDisabled: Bool
-    let isSending: Bool
     let isPlanModeArmed: Bool
     let queuedCount: Int
     let isQueuePaused: Bool
@@ -41,6 +38,11 @@ struct ComposerBottomBar: View {
     private let metaLabelColor = Color(.secondaryLabel)
     private var metaTextFont: Font { AppFont.subheadline() }
     private var metaSymbolFont: Font { AppFont.system(size: 11, weight: .regular) }
+    private let metaSymbolSize: CGFloat = 12
+    private let brainSymbolSize: CGFloat = 8
+    private let reasoningSymbolName = "brain"
+    private let reasoningSymbolIsAsset = true
+    private var metaChevronFont: Font { AppFont.system(size: 9, weight: .regular) }
     private let metaVerticalPadding: CGFloat = 6
     private let plusTapTargetSide: CGFloat = 22
 
@@ -59,17 +61,8 @@ struct ComposerBottomBar: View {
     var body: some View {
         HStack(spacing: 12) {
             attachmentMenu
-            ComposerRuntimeMenuControl(
-                orderedModelOptions: orderedModelOptions,
-                selectedModelID: selectedModelID,
-                selectedModelTitle: selectedModelTitle,
-                isLoadingModels: isLoadingModels,
-                isRuntimeSelectionLoading: isRuntimeSelectionLoading,
-                runtimeState: runtimeState,
-                runtimeActions: runtimeActions,
-                showsAllModelsSheet: $showsAllModelsSheet
-            )
-            .equatable()
+            modelMenu
+            reasoningMenu
             if isPlanModeArmed {
                 Divider()
                     .frame(height: 16)
@@ -91,7 +84,7 @@ struct ComposerBottomBar: View {
                 .accessibilityLabel("Resume queued messages")
             }
 
-            // Voice -> Stop/loading -> Send. New sends can look running before the turn id is interruptible.
+            // Voice → Stop → Send
             Button {
                 HapticFeedback.shared.triggerImpactFeedback()
                 onTapVoice()
@@ -101,12 +94,7 @@ struct ComposerBottomBar: View {
             .disabled(voiceButtonPresentation.isDisabled)
             .accessibilityLabel(voiceButtonPresentation.accessibilityLabel)
 
-            if isThreadRunning && isSending && activeTurnID == nil {
-                ProgressView()
-                    .tint(Color(.label))
-                    .frame(width: 32, height: 32)
-                    .accessibilityLabel("Starting run")
-            } else if isThreadRunning {
+            if isThreadRunning {
                 Button {
                     HapticFeedback.shared.triggerImpactFeedback()
                     onStopTurn(activeTurnID)
@@ -117,7 +105,6 @@ struct ComposerBottomBar: View {
                         .frame(width: 32, height: 32)
                         .background(Color(.label), in: Circle())
                 }
-                .accessibilityLabel("Stop current run")
             }
 
             Button {
@@ -141,21 +128,6 @@ struct ComposerBottomBar: View {
         .padding(.horizontal, 16)
         .padding(.bottom, 4)
         .padding(.top, 2)
-        .sheet(isPresented: $showsAllModelsSheet) {
-            AllModelsSheet(
-                models: orderedModelOptions,
-                selectedModelID: selectedModelID,
-                isLoadingModels: isLoadingModels,
-                modelSupportsFastMode: modelSupportsFastMode,
-                onSelect: { modelID in
-                    HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                    runtimeActions.selectModel(modelID)
-                    showsAllModelsSheet = false
-                }
-            )
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
-        }
     }
 
     private var voiceButtonLabel: some View {
@@ -195,15 +167,6 @@ struct ComposerBottomBar: View {
                 Label("Plan mode", systemImage: "checklist")
             }
 
-            if runtimeState.supportsFastMode {
-                Button {
-                    HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                    toggleFastMode()
-                } label: {
-                    Label("Fast Mode", systemImage: fastModePlusMenuIconName)
-                }
-            }
-
             Section {
                 Button("Photo library") {
                     HapticFeedback.shared.triggerImpactFeedback()
@@ -226,84 +189,44 @@ struct ComposerBottomBar: View {
         }
         .tint(metaLabelColor)
         .disabled(isComposerInteractionLocked)
-        .accessibilityLabel("Composer options")
+        .accessibilityLabel("Attachment and plan options")
     }
 
-    private var planModeIndicator: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "checklist")
-                .font(metaSymbolFont)
-            Text("Plan")
-                .font(metaTextFont)
-                .fontWeight(.regular)
-                .lineLimit(1)
-        }
-        .padding(.vertical, metaVerticalPadding)
-        .padding(.horizontal, 4)
-        .foregroundStyle(Color(.plan))
-    }
-
-    // Toggling Fast Mode from the plus menu mirrors the runtime speed menu without adding another visible pill.
-    private func toggleFastMode() {
-        runtimeActions.selectServiceTier(runtimeState.isSelectedServiceTier(.fast) ? nil : .fast)
-    }
-
-    private var fastModePlusMenuIconName: String {
-        runtimeState.isSelectedServiceTier(.fast) ? "bolt.fill" : "bolt"
-    }
-
-    // Mirrors the bridge-provided runtime capability instead of guessing from the model name.
-    private func modelSupportsFastMode(_ model: CodexModelOption) -> Bool {
-        return model.supportsServiceTier(.fast)
-    }
-
-    private var queueBadge: some View {
-        HStack(spacing: 3) {
-            if isQueuePaused {
-                Image(systemName: "pause.fill")
-                    .font(AppFont.system(size: 8, weight: .bold))
-            }
-            Text("\(queuedCount)")
-                .font(AppFont.caption2(weight: .bold))
-        }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(
-            Capsule().fill(isQueuePaused ? Color(.systemGray3) : Color(.systemGray4))
-        )
-    }
-}
-
-// Keeps the SwiftUI Menu from rebuilding during unrelated thread-sync updates.
-private struct ComposerRuntimeMenuControl: View, Equatable {
-    let orderedModelOptions: [CodexModelOption]
-    let selectedModelID: String?
-    let selectedModelTitle: String
-    let isLoadingModels: Bool
-    let isRuntimeSelectionLoading: Bool
-    let runtimeState: TurnComposerRuntimeState
-    let runtimeActions: TurnComposerRuntimeActions
-    @Binding var showsAllModelsSheet: Bool
-
-    private let metaLabelColor = Color(.secondaryLabel)
-    private var metaTextFont: Font { AppFont.subheadline() }
-    private var metaSymbolFont: Font { AppFont.system(size: 11, weight: .regular) }
-    private var metaChevronFont: Font { AppFont.system(size: 9, weight: .regular) }
-
-    static func == (lhs: ComposerRuntimeMenuControl, rhs: ComposerRuntimeMenuControl) -> Bool {
-        lhs.orderedModelOptions == rhs.orderedModelOptions
-            && lhs.selectedModelID == rhs.selectedModelID
-            && lhs.selectedModelTitle == rhs.selectedModelTitle
-            && lhs.isLoadingModels == rhs.isLoadingModels
-            && lhs.isRuntimeSelectionLoading == rhs.isRuntimeSelectionLoading
-            && lhs.runtimeState == rhs.runtimeState
-    }
-
-    // One consolidated runtime pill: Effort + featured models + Speed as flat sections.
-    var body: some View {
+    private var modelMenu: some View {
         Menu {
-            Section("Effort") {
+            Text("Select model")
+            if isLoadingModels {
+                Text("Loading models...")
+            } else if orderedModelOptions.isEmpty {
+                Text("No models available")
+            } else {
+                ForEach(orderedModelOptions, id: \.id) { model in
+                    Button {
+                        HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                        runtimeActions.selectModel(model.id)
+                    } label: {
+                        if selectedModelID == model.id {
+                            Label(TurnComposerMetaMapper.modelTitle(for: model), systemImage: "checkmark")
+                        } else {
+                            Text(TurnComposerMetaMapper.modelTitle(for: model))
+                        }
+                    }
+                }
+            }
+        } label: {
+            composerMenuLabel(
+                title: selectedModelTitle,
+                leadingImageName: runtimeState.showsSpeedBadgeInModelMenu ? "bolt.fill" : nil,
+                leadingImageIsSystem: true
+            )
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .tint(metaLabelColor)
+    }
+
+    private var reasoningMenu: some View {
+        Menu {
+            Section("Reasoning") {
                 if runtimeState.reasoningDisplayOptions.isEmpty {
                     Text("No reasoning options")
                 } else {
@@ -323,63 +246,36 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
                 }
             }
 
-            Section("Change model") {
-                if isLoadingModels {
-                    Text("Loading models...")
-                } else if orderedModelOptions.isEmpty {
-                    Text("No models available")
-                } else {
-                    ForEach(featuredModelOptions, id: \.id) { model in
-                        Button {
-                            HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                            runtimeActions.selectModel(model.id)
-                        } label: {
-                            modelMenuRow(for: model)
-                        }
-                    }
-
-                    if hasNonFeaturedModels {
-                        Button("Other models") {
-                            HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                            DispatchQueue.main.async {
-                                showsAllModelsSheet = true
-                            }
-                        }
+            Section("Speed") {
+                Button {
+                    HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                    runtimeActions.selectServiceTier(nil)
+                } label: {
+                    if runtimeState.isSelectedServiceTier(nil) {
+                        Label("Normal", systemImage: "checkmark")
+                    } else {
+                        Text("Normal")
                     }
                 }
-            }
 
-            if runtimeState.supportsFastMode {
-                Section("Speed") {
+                ForEach(CodexServiceTier.allCases, id: \.rawValue) { tier in
                     Button {
                         HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                        runtimeActions.selectServiceTier(nil)
+                        runtimeActions.selectServiceTier(tier)
                     } label: {
-                        if runtimeState.isSelectedServiceTier(nil) {
-                            Label("Normal", systemImage: "checkmark")
+                        if runtimeState.isSelectedServiceTier(tier) {
+                            Label(tier.displayName, systemImage: "checkmark")
                         } else {
-                            Text("Normal")
-                        }
-                    }
-
-                    ForEach(CodexServiceTier.allCases, id: \.rawValue) { tier in
-                        Button {
-                            HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                            runtimeActions.selectServiceTier(tier)
-                        } label: {
-                            if runtimeState.isSelectedServiceTier(tier) {
-                                Label(tier.displayName, systemImage: "checkmark")
-                            } else {
-                                Text(tier.displayName)
-                            }
+                            Text(tier.displayName)
                         }
                     }
                 }
             }
         } label: {
             composerMenuLabel(
-                title: compactRuntimeTitle,
-                leadingImageName: runtimeState.showsSpeedBadgeInModelMenu ? "bolt.fill" : nil
+                title: runtimeState.selectedReasoningTitle,
+                leadingImageName: reasoningSymbolName,
+                leadingImageIsSystem: false
             )
         }
         .fixedSize(horizontal: true, vertical: false)
@@ -387,82 +283,59 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
         .tint(metaLabelColor)
     }
 
-    private var compactRuntimeTitle: String {
-        if selectedModelID == nil {
-            return isRuntimeSelectionLoading ? "Loading…" : "5.5 Medium"
+    private var planModeIndicator: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "checklist")
+                .font(metaSymbolFont)
+            Text("Plan")
+                .font(metaTextFont)
+                .fontWeight(.regular)
+                .lineLimit(1)
         }
-        return "\(compactModelTitle) \(runtimeState.selectedReasoningTitle)"
+        .padding(.vertical, metaVerticalPadding)
+        .padding(.horizontal, 4)
+        .foregroundStyle(Color(.plan))
     }
 
-    // Keeps the family suffix visible while shortening the common GPT prefix.
-    private var compactModelTitle: String {
-        let stripped: String
-        if selectedModelTitle.lowercased().hasPrefix("gpt-") {
-            stripped = String(selectedModelTitle.dropFirst("GPT-".count))
-        } else {
-            stripped = selectedModelTitle
-        }
-        return stripped.replacingOccurrences(of: "-", with: " ")
-    }
 
-    @ViewBuilder
-    private func modelMenuRow(for model: CodexModelOption) -> some View {
-        HStack(spacing: 8) {
-            if selectedModelID == model.id {
-                Image(systemName: "checkmark")
+    private var queueBadge: some View {
+        HStack(spacing: 3) {
+            if isQueuePaused {
+                Image(systemName: "pause.fill")
+                    .font(AppFont.system(size: 8, weight: .bold))
             }
-            if model.supportsServiceTier(.fast) {
-                Image(systemName: CodexServiceTier.fast.iconName)
-            }
-            Text(TurnComposerMetaMapper.modelTitle(for: model))
+            Text("\(queuedCount)")
+                .font(AppFont.caption2(weight: .bold))
         }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(
+            Capsule().fill(isQueuePaused ? Color(.systemGray3) : Color(.systemGray4))
+        )
     }
 
-    // The currently selected model is pinned alongside headline models.
-    private var featuredModelOptions: [CodexModelOption] {
-        var seenIDs = Set<String>()
-        var result: [CodexModelOption] = []
-
-        func append(_ model: CodexModelOption) {
-            guard seenIDs.insert(model.id).inserted else { return }
-            result.append(model)
-        }
-
-        for model in orderedModelOptions where Self.matchesFeaturedIdentifier(model) {
-            append(model)
-        }
-        if let selected = orderedModelOptions.first(where: { $0.id == selectedModelID }) {
-            append(selected)
-        }
-        return result
-    }
-
-    private var hasNonFeaturedModels: Bool {
-        orderedModelOptions.contains { model in
-            !featuredModelOptions.contains(where: { $0.id == model.id })
-        }
-    }
-
-    private static let featuredModelIdentifiers: Set<String> = [
-        "gpt-5.5",
-        "gpt-5.4",
-    ]
-
-    private static func matchesFeaturedIdentifier(_ model: CodexModelOption) -> Bool {
-        let normalizedID = model.id.lowercased()
-        let normalizedModel = model.model.lowercased()
-        return featuredModelIdentifiers.contains(normalizedID)
-            || featuredModelIdentifiers.contains(normalizedModel)
-    }
+    // MARK: - Shared Label
 
     private func composerMenuLabel(
         title: String,
-        leadingImageName: String?
+        leadingImageName: String? = nil,
+        leadingImageIsSystem: Bool = true
     ) -> some View {
         HStack(spacing: 6) {
             if let leadingImageName {
-                Image(systemName: leadingImageName)
-                    .font(metaSymbolFont)
+                Group {
+                    if leadingImageIsSystem {
+                        Image(systemName: leadingImageName)
+                            .font(metaSymbolFont)
+                    } else {
+                        Image(leadingImageName)
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: metaSymbolSize, height: metaSymbolSize)
+                    }
+                }
             }
 
             Text(title)
@@ -473,94 +346,12 @@ private struct ComposerRuntimeMenuControl: View, Equatable {
             Image(systemName: "chevron.down")
                 .font(metaChevronFont)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, metaVerticalPadding)
         .padding(.horizontal, 4)
         .foregroundStyle(metaLabelColor)
+        // Keep adjacent menus from borrowing each other's touch region when the
+        // phone composer gets tight while the keyboard is up.
         .fixedSize(horizontal: true, vertical: false)
-        .contentShape(Rectangle())
-    }
-}
-
-// Full-list model picker shown when the user taps "See all models…" inside the
-// runtime menu. Lives in a sheet so it sidesteps the SwiftUI nested-Menu bug
-// while still keeping the runtime pill compact.
-private struct AllModelsSheet: View {
-    let models: [CodexModelOption]
-    let selectedModelID: String?
-    let isLoadingModels: Bool
-    let modelSupportsFastMode: (CodexModelOption) -> Bool
-    let onSelect: (String) -> Void
-
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            Group {
-                if isLoadingModels {
-                    ProgressView("Loading models…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if models.isEmpty {
-                    ContentUnavailableView(
-                        "No models available",
-                        systemImage: "square.stack.3d.up.slash",
-                        description: Text("Reconnect to your local Codex bridge to refresh the model list.")
-                    )
-                } else {
-                    List {
-                        Section {
-                            ForEach(models, id: \.id) { model in
-                                Button {
-                                    onSelect(model.id)
-                                } label: {
-                                    modelRow(for: model)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                    .listStyle(.insetGrouped)
-                }
-            }
-            .navigationTitle("Choose model")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func modelRow(for model: CodexModelOption) -> some View {
-        let title = TurnComposerMetaMapper.modelTitle(for: model)
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: model.id == selectedModelID ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 18))
-                .foregroundStyle(model.id == selectedModelID ? Color.accentColor : Color(.tertiaryLabel))
-                .padding(.top, 2)
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(title)
-                        .font(AppFont.body(weight: .medium))
-                        .foregroundStyle(Color(.label))
-                    if modelSupportsFastMode(model) {
-                        Image(systemName: CodexServiceTier.fast.iconName)
-                            .font(AppFont.system(size: 11, weight: .regular))
-                            .foregroundStyle(Color(.secondaryLabel))
-                    }
-                }
-                if !model.description.isEmpty {
-                    Text(model.description)
-                        .font(AppFont.subheadline())
-                        .foregroundStyle(Color(.secondaryLabel))
-                }
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 4)
         .contentShape(Rectangle())
     }
 }

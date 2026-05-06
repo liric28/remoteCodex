@@ -526,9 +526,14 @@ function readBridgeConfig({
   const daemonConfig = readDaemonConfig({ env, fsImpl }) || {};
   const privateDefaults = readPrivatePackageDefaults({ runtimeRoot, fsImpl });
   const sourceCheckout = isSourceCheckout(runtimeRoot, fsImpl);
-  const defaultRelayUrl = sourceCheckout
+  const packagedRelayUrl = sourceCheckout
     ? ""
     : privateDefaults.relayUrl;
+  const persistedRelayUrl = readString(daemonConfig.relayUrl) || "";
+  const hasPersistedRelayOverride = Boolean(persistedRelayUrl)
+    && persistedRelayUrl !== packagedRelayUrl;
+  // 优先复用上次持久化的 relay，避免 remodex up 在无环境变量时退回 hosted 默认值。
+  const defaultRelayUrl = persistedRelayUrl || packagedRelayUrl;
   const explicitRelayUrl = readFirstDefinedEnv(
     ["REMODEX_RELAY", "PHODEX_RELAY"],
     "",
@@ -539,7 +544,7 @@ function readBridgeConfig({
     defaultRelayUrl,
     env
   );
-  const defaultPushServiceUrl = sourceCheckout || explicitRelayUrl
+  const defaultPushServiceUrl = sourceCheckout || explicitRelayUrl || hasPersistedRelayOverride
     ? ""
     : privateDefaults.pushServiceUrl;
   const codexEndpoint = readFirstDefinedEnv(
@@ -578,10 +583,9 @@ function readBridgeConfig({
       DEFAULT_DEBOUNCE_MS
     ),
     keepMacAwakeEnabled: explicitKeepMacAwakeEnabled == null
-      ? (persistedKeepMacAwakeEnabled == null ? false : persistedKeepMacAwakeEnabled)
+      ? (persistedKeepMacAwakeEnabled == null ? true : persistedKeepMacAwakeEnabled)
       : explicitKeepMacAwakeEnabled,
     codexEndpoint,
-    desktopIpcSocketPath: readFirstDefinedEnv(["REMODEX_DESKTOP_IPC_SOCKET"], "", env),
     refreshCommand,
     codexBundleId: readFirstDefinedEnv(["REMODEX_CODEX_BUNDLE_ID"], DEFAULT_BUNDLE_ID, env),
     codexAppPath: DEFAULT_APP_PATH,

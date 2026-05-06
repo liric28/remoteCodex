@@ -94,23 +94,15 @@ test("loadOrCreateBridgeDeviceState migrates a valid Keychain mirror into the ca
   });
 });
 
-test("loadOrCreateBridgeDeviceState replaces a corrupted legacy Keychain mirror with a fresh canonical state", () => {
+test("loadOrCreateBridgeDeviceState throws when only the legacy Keychain mirror is corrupted", () => {
   withTempDeviceStateEnv(({ keychainMirrorFile, canonicalStateFile }) => {
     fs.writeFileSync(keychainMirrorFile, "{ definitely-not-json", "utf8");
 
-    const loadedState = loadOrCreateBridgeDeviceState();
-
-    assert.equal(loadedState.version, 1);
-    assert.ok(loadedState.macDeviceId);
-    assert.ok(loadedState.macIdentityPublicKey);
-    assert.ok(loadedState.macIdentityPrivateKey);
-    assert.deepEqual(loadedState.trustedPhones, {});
-    assert.deepEqual(readCanonicalStateFromDisk(), stripUndefined(loadedState));
-    assert.deepEqual(
-      JSON.parse(fs.readFileSync(keychainMirrorFile, "utf8")),
-      stripUndefined(loadedState)
+    assert.throws(
+      () => loadOrCreateBridgeDeviceState(),
+      /saved Remodex pairing state in legacy Keychain bridge state is unreadable/i
     );
-    assert.equal(fs.existsSync(canonicalStateFile), true);
+    assert.equal(fs.existsSync(canonicalStateFile), false);
   });
 });
 

@@ -67,10 +67,6 @@ struct TurnComposerHostView: View {
             isSkillAutocompleteVisible: viewModel.isSkillAutocompleteVisible,
             isSkillAutocompleteLoading: viewModel.isSkillAutocompleteLoading,
             skillAutocompleteQuery: viewModel.skillAutocompleteQuery,
-            pluginAutocompleteItems: viewModel.pluginAutocompleteItems,
-            isPluginAutocompleteVisible: viewModel.isPluginAutocompleteVisible,
-            isPluginAutocompleteLoading: viewModel.isPluginAutocompleteLoading,
-            pluginAutocompleteQuery: viewModel.pluginAutocompleteQuery,
             slashCommandPanelState: viewModel.slashCommandPanelState,
             hasComposerContentConflictingWithReview: viewModel.hasComposerContentConflictingWithReview,
             isThreadRunning: isThreadRunning,
@@ -82,13 +78,12 @@ struct TurnComposerHostView: View {
         )
         let accessoryState = TurnComposerAccessoryState(
             queuedDrafts: viewModel.queuedDraftsList(codex: codex, threadID: thread.id),
-            canSteerQueuedDrafts: isThreadRunning && activeTurnID != nil,
+            canSteerQueuedDrafts: isThreadRunning,
             canRestoreQueuedDrafts: viewModel.canRestoreQueuedDrafts,
             steeringDraftID: viewModel.steeringDraftID,
             composerAttachments: viewModel.composerAttachments,
             composerMentionedFiles: viewModel.composerMentionedFiles,
             composerMentionedSkills: viewModel.composerMentionedSkills,
-            composerMentionedPlugins: viewModel.composerMentionedPlugins,
             composerReviewSelection: viewModel.composerReviewSelection,
             isSubagentsSelectionArmed: viewModel.isSubagentsSelectionArmed,
             isVoiceRecording: isVoiceRecording,
@@ -100,10 +95,6 @@ struct TurnComposerHostView: View {
             reasoningDisplayOptions: reasoningDisplayOptions
         )
         let runtimeActions = TurnComposerRuntimeActions.resolve(codex: codex)
-        // Keep the runtime pill in a loading state until both chat metadata and models finish hydrating.
-        let isRuntimeSelectionLoading = codex.isBootstrappingConnectionSync
-            || codex.isLoadingThreads
-            || codex.isLoadingModels
 
         TurnComposerView(
             input: $viewModel.input,
@@ -113,7 +104,6 @@ struct TurnComposerHostView: View {
             remainingAttachmentSlots: viewModel.remainingAttachmentSlots,
             isComposerInteractionLocked: viewModel.isComposerInteractionLocked(activeTurnID: activeTurnID),
             isSendDisabled: viewModel.isSendDisabled(isConnected: codex.isConnected, activeTurnID: activeTurnID),
-            isSending: viewModel.isSending,
             isPlanModeArmed: viewModel.isPlanModeArmed,
             queuedCount: viewModel.queuedCount(codex: codex, threadID: thread.id),
             isQueuePaused: viewModel.isQueuePaused(codex: codex, threadID: thread.id),
@@ -122,10 +112,9 @@ struct TurnComposerHostView: View {
             isEmptyThread: isEmptyThread,
             isWorktreeProject: isWorktreeProject,
             orderedModelOptions: orderedModelOptions,
-            selectedModelID: isRuntimeSelectionLoading ? nil : (codex.selectedModelOption()?.id ?? codex.selectedModelId),
+            selectedModelID: codex.selectedModelOption()?.id,
             selectedModelTitle: selectedModelTitle,
             isLoadingModels: codex.isLoadingModels,
-            isRuntimeSelectionLoading: isRuntimeSelectionLoading,
             runtimeState: runtimeState,
             runtimeActions: runtimeActions,
             voiceButtonPresentation: voiceButtonPresentation,
@@ -153,6 +142,10 @@ struct TurnComposerHostView: View {
             },
             onRefreshGitBranches: onRefreshGitBranches,
             onRefreshUsageStatus: {
+                await codex.refreshUsageStatus(threadId: thread.id)
+            },
+            onRefreshAccount: {
+                await codex.refreshGPTAccountSessionOnMac()
                 await codex.refreshUsageStatus(threadId: thread.id)
             },
             onSelectAccessMode: codex.setSelectedAccessMode,
@@ -185,14 +178,6 @@ struct TurnComposerHostView: View {
                     activeTurnID: activeTurnID
                 )
             },
-            onInputChangedForPluginAutocomplete: { text in
-                viewModel.onInputChangedForPluginAutocomplete(
-                    text,
-                    codex: codex,
-                    thread: thread,
-                    activeTurnID: activeTurnID
-                )
-            },
             onInputChangedForSlashCommandAutocomplete: { text in
                 viewModel.onInputChangedForSlashCommandAutocomplete(
                     text,
@@ -201,16 +186,10 @@ struct TurnComposerHostView: View {
             },
             onSelectFileAutocomplete: viewModel.onSelectFileAutocomplete,
             onSelectSkillAutocomplete: viewModel.onSelectSkillAutocomplete,
-            onSelectPluginAutocomplete: viewModel.onSelectPluginAutocomplete,
             onSelectSlashCommand: { command in
                 switch command {
                 case .codeReview:
                     viewModel.onSelectSlashCommand(command)
-                case .compact:
-                    viewModel.onSelectSlashCommand(command)
-                    Task {
-                        try? await codex.compactThread(thread.id)
-                    }
                 case .feedback:
                     viewModel.onSelectSlashCommand(command)
                     onOpenFeedbackMail()
@@ -242,7 +221,6 @@ struct TurnComposerHostView: View {
             onCloseSlashCommandPanel: viewModel.closeSlashCommandPanel,
             onRemoveMentionedFile: viewModel.removeMentionedFile,
             onRemoveMentionedSkill: viewModel.removeMentionedSkill,
-            onRemoveMentionedPlugin: viewModel.removeMentionedPlugin,
             onRemoveComposerReviewSelection: viewModel.clearComposerReviewSelection,
             onRemoveComposerSubagentsSelection: viewModel.clearSubagentsSelection,
             onPasteImageData: { imageDataItems in

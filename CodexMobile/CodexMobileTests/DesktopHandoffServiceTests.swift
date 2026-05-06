@@ -1,5 +1,5 @@
 // FILE: DesktopHandoffServiceTests.swift
-// Purpose: Verifies desktop handoff and display-wake requests use the bridge RPC contract.
+// Purpose: Verifies Mac handoff requests cover the new display-wake flow for connected and saved-pair paths.
 // Layer: Unit Test
 // Exports: DesktopHandoffServiceTests
 // Depends on: XCTest, CodexMobile
@@ -9,27 +9,6 @@ import XCTest
 
 @MainActor
 final class DesktopHandoffServiceTests: XCTestCase {
-    func testContinueOnDesktopUsesPlatformNeutralBridgeMethod() async throws {
-        let service = makeService()
-        var capturedMethod: String?
-        var capturedParams: JSONValue?
-        service.requestTransportOverride = { method, params in
-            capturedMethod = method
-            capturedParams = params
-            return RPCMessage(
-                id: .string(UUID().uuidString),
-                result: .object(["success": .bool(true)]),
-                includeJSONRPC: false
-            )
-        }
-
-        let handoff = DesktopHandoffService(codex: service)
-        try await handoff.continueOnDesktopApp(threadId: " thread-123 ")
-
-        XCTAssertEqual(capturedMethod, "desktop/continueOnDesktop")
-        XCTAssertEqual(capturedParams?.objectValue?["threadId"]?.stringValue, "thread-123")
-    }
-
     func testWakeDisplayUsesCurrentBridgeConnectionWhenAvailable() async throws {
         let service = makeService()
         service.isConnected = true
@@ -53,18 +32,8 @@ final class DesktopHandoffServiceTests: XCTestCase {
 
     func testWakeDisplayUsesSavedSessionWhenDisconnected() async throws {
         let service = makeService()
-        let macDeviceID = "mac-\(UUID().uuidString)"
-        let relayURL = "ws://macbook-pro-di-emanuele.local:8080/ws"
-        service.trustedMacRegistry.records[macDeviceID] = CodexTrustedMacRecord(
-            macDeviceId: macDeviceID,
-            macIdentityPublicKey: Data(repeating: 19, count: 32).base64EncodedString(),
-            lastPairedAt: Date(),
-            relayURL: relayURL
-        )
-        service.lastTrustedMacDeviceId = macDeviceID
-        service.relayUrl = relayURL
+        service.relayUrl = "ws://macbook-pro-di-emanuele.local:8080/ws"
         service.relaySessionId = "session-123"
-        service.relayMacDeviceId = macDeviceID
 
         var capturedURL: String?
         var capturedMethods: [String] = []
@@ -103,23 +72,40 @@ final class DesktopHandoffServiceTests: XCTestCase {
         } catch let error as DesktopHandoffError {
             XCTAssertEqual(
                 error.errorDescription,
-                "Reconnect to your paired computer first."
+                "Reconnect to your Mac or scan a new QR code first."
             )
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
     }
 
-    func testUnsupportedPlatformMessageIsPlatformNeutral() {
-        let error = DesktopHandoffError.bridgeError(
-            code: "unsupported_platform",
-            message: "Unsupported platform"
+    func testWakeDisplayShowsMacRestartInstructionWhenTrustedMacIsOffline() async {
+        let service = makeService()
+        let macDeviceID = "mac-\(UUID().uuidString)"
+        let relayURL = "wss://relay.local/relay"
+        service.trustedMacRegistry.records[macDeviceID] = CodexTrustedMacRecord(
+            macDeviceId: macDeviceID,
+            macIdentityPublicKey: Data(repeating: 21, count: 32).base64EncodedString(),
+            lastPairedAt: Date(),
+            relayURL: relayURL
         )
+        service.lastTrustedMacDeviceId = macDeviceID
+        service.trustedSessionResolverOverride = {
+            throw CodexTrustedSessionResolveError.macOffline("Your trusted Mac is offline right now.")
+        }
+        let handoff = DesktopHandoffService(codex: service)
 
-        XCTAssertEqual(
-            error.errorDescription,
-            "Desktop app handoff works only when the bridge is running on a supported desktop platform."
-        )
+        do {
+            try await handoff.wakeDisplay()
+            XCTFail("Expected wakeDisplay to fail when the trusted Mac is offline.")
+        } catch let error as DesktopHandoffError {
+            XCTAssertEqual(
+                error.errorDescription,
+                "Your trusted Mac is offline right now. On your Mac, run `remodex status`. If the bridge is stopped or stuck, run `remodex restart`."
+            )
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
     }
 
     private func makeService() -> CodexService {

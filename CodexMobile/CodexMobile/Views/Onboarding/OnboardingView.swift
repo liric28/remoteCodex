@@ -7,8 +7,7 @@
 import SwiftUI
 
 struct OnboardingView: View {
-    let onScanQRCode: () -> Void
-    let onPairWithCode: () -> Void
+    let onContinue: () -> Void
     @State private var currentPage = 0
     @State private var isShowingCodexInstallReminder = false
 
@@ -31,8 +30,8 @@ struct OnboardingView: View {
                     OnboardingStepPage(
                         stepNumber: 1,
                         icon: "terminal",
-                        title: "Install Codex CLI",
-                        description: "The AI coding agent that lives in your terminal. Remodex connects to it from your iPhone.",
+                        title: L("Install Codex CLI", "安装 Codex CLI"),
+                        description: L("The AI coding agent that lives in your terminal. Remodex connects to it from your iPhone.", "运行在终端里的 AI 编码代理。Remodex 会从 iPhone 连接到它。"),
                         command: codexInstallCommand
                     )
                     .tag(2)
@@ -40,18 +39,18 @@ struct OnboardingView: View {
                     OnboardingStepPage(
                         stepNumber: 2,
                         icon: "link",
-                        title: "Install the Bridge",
-                        description: "A lightweight relay that securely connects your Mac to your iPhone.",
+                        title: L("Install the Bridge", "安装桥接"),
+                        description: L("A lightweight relay that securely connects your Mac to your iPhone.", "一个轻量级中继，用于安全连接你的 Mac 和 iPhone。"),
                         command: "npm install -g remodex@latest",
-                        commandCaption: "Remodex can keep your Mac awake with macOS caffeinate while the bridge is running, but it starts disabled by default. You can enable it later in Settings if you want."
+                        commandCaption: L("Remodex uses macOS caffeinate by default while the bridge is running so your Mac stays reachable even if the display turns off. You can change this later in Settings.", "桥接运行时，Remodex 默认使用 macOS caffeinate，让 Mac 即使关闭显示器也保持可连接。你之后可以在设置中修改。")
                     )
                     .tag(3)
 
                     OnboardingStepPage(
                         stepNumber: 3,
                         icon: "qrcode.viewfinder",
-                        title: "Start Pairing",
-                        description: "Run this on your computer. A QR code will appear in your terminal — scan it next.",
+                        title: L("Start Pairing", "开始配对"),
+                        description: L("Run this on your Mac. A QR code will appear in your terminal — scan it next.", "在 Mac 上运行此命令。终端中会出现二维码，下一步扫描它。"),
                         command: "remodex up"
                     )
                     .tag(4)
@@ -68,7 +67,7 @@ struct OnboardingView: View {
                 advanceToNextPage()
             }
         } message: {
-            Text("Copy and paste \"\(codexInstallCommand)\" on your computer before moving on. Remodex will not work until Codex CLI is installed and available in your PATH.")
+            Text("Copy and paste \"\(codexInstallCommand)\" on your Mac before moving on. Remodex will not work until Codex CLI is installed and available in your PATH.")
         }
     }
 
@@ -86,7 +85,12 @@ struct OnboardingView: View {
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.8), value: currentPage)
 
-            finalPageActions
+            // CTA button
+            PrimaryCapsuleButton(
+                title: buttonTitle,
+                systemImage: currentPage == pageCount - 1 ? "qrcode" : nil,
+                action: handleContinue
+            )
 
             OpenSourceBadge(style: .light)
         }
@@ -106,60 +110,12 @@ struct OnboardingView: View {
 
     // MARK: - State
 
-    @ViewBuilder
-    private var finalPageActions: some View {
-        if currentPage == pageCount - 1 {
-            VStack(spacing: 10) {
-                PrimaryCapsuleButton(
-                    title: "Scan with QR Code",
-                    systemImage: "qrcode",
-                    action: handleContinue
-                )
-
-                secondaryCapsuleButton(
-                    title: "Pair with Code",
-                    systemImage: "keyboard",
-                    action: onPairWithCode
-                )
-            }
-        } else {
-            PrimaryCapsuleButton(
-                title: buttonTitle,
-                action: handleContinue
-            )
-        }
-    }
-
-    // Offers the first-run manual pairing path without competing visually with the primary QR flow.
-    private func secondaryCapsuleButton(title: String, systemImage: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 15, weight: .semibold))
-
-                Text(title)
-                    .font(AppFont.body(weight: .semibold))
-            }
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .frame(height: 54)
-            .background(
-                Capsule()
-                    .fill(Color.white.opacity(0.1))
-            )
-            .overlay(
-                Capsule()
-                    .stroke(Color.white.opacity(0.18), lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
     private var buttonTitle: String {
         switch currentPage {
-        case 0: return "Get Started"
-        case 1: return "Set Up"
-        default: return "Continue"
+        case 0: return L("Get Started", "开始使用")
+        case 1: return L("Set Up", "开始设置")
+        case pageCount - 1: return L("Scan QR Code", "扫描二维码")
+        default: return L("Continue", "继续")
         }
     }
 
@@ -173,7 +129,7 @@ struct OnboardingView: View {
         if currentPage < pageCount - 1 {
             advanceToNextPage()
         } else {
-            onScanQRCode()
+            onContinue()
         }
     }
 
@@ -187,24 +143,14 @@ struct OnboardingView: View {
 // MARK: - Previews
 
 #Preview("Full Flow") {
-    OnboardingView(
-        onScanQRCode: {
-            print("Scan tapped")
-        },
-        onPairWithCode: {
-            print("Code tapped")
-        }
-    )
+    OnboardingView {
+        print("Continue tapped")
+    }
 }
 
 #Preview("Light Override") {
-    OnboardingView(
-        onScanQRCode: {
-            print("Scan tapped")
-        },
-        onPairWithCode: {
-            print("Code tapped")
-        }
-    )
+    OnboardingView {
+        print("Continue tapped")
+    }
     .preferredColorScheme(.light)
 }

@@ -56,8 +56,6 @@ struct ContentView: View {
     @State private var activeSidebarGestureDebugID: Int?
     @State private var lastSidebarGestureLogBucket: Int?
     @State private var sidebarGestureAutoCommitted = false
-    @State private var sidebarSelectionSuppressedUntil: Date?
-    @State private var isOpeningNewChatFromSidebar = false
     @AppStorage("codex.hasSeenOnboarding") private var hasSeenOnboarding = false
     @AppStorage("codex.whatsNew.lastPresentedVersion") private var lastPresentedWhatsNewVersion = ""
 
@@ -66,12 +64,12 @@ struct ContentView: View {
     private let sidebarOpenActivationWidth: CGFloat = 80
     private let sidebarPrewarmDelayNanoseconds: UInt64 = 700_000_000
     private let whatsNewPresentationDelayNanoseconds: UInt64 = 30_000_000_000
+    private let wakeMessageDismissDelayNanoseconds: UInt64 = 5_000_000_000
     private let sidebarGestureLogBucketWidth: CGFloat = 40
     private let sidebarSwipeCommitDistance: CGFloat = 30
-    private let sidebarSelectionSuppressionDuration: TimeInterval = 0.35
-    private let whatsNewReleaseVersion = "1.5"
+    private let wakingSavedMacDisplayStatusMessage = "Trying to wake your Mac display..."
+    private let whatsNewReleaseVersion = "1.1"
     private static let sidebarSpring = Animation.spring(response: 0.35, dampingFraction: 0.85)
-    private static var isSidebarDebugLoggingEnabled: Bool { false }
 
     var body: some View {
         rootContentWithBannerOverlay
@@ -243,7 +241,7 @@ struct ContentView: View {
                     manualPairingCode = ""
                 }
             } message: {
-                Text("Paste the pairing code shown in the terminal on your computer or in your phone shell.")
+                Text("Paste the pairing code shown in the terminal on your Mac or in your phone shell.")
             }
     }
 
@@ -271,10 +269,9 @@ struct ContentView: View {
     @ViewBuilder
     private var rootContent: some View {
         if !hasSeenOnboarding {
-            OnboardingView(
-                onScanQRCode: finishOnboardingAndShowScanner,
-                onPairWithCode: finishOnboardingAndShowPairingCode
-            )
+            OnboardingView {
+                finishOnboardingAndShowScanner()
+            }
         } else if subscriptions.bootstrapState == .failed && !subscriptions.hasAppAccess {
             SubscriptionBootstrapFailureView()
         } else if !subscriptions.hasAppAccess {
@@ -296,14 +293,6 @@ struct ContentView: View {
             hasDismissedAutomaticScanner = false
             scannerCanReturnToOnboarding = true
         }
-    }
-
-    // Opens code entry over the last onboarding page; a valid code completes onboarding after resolution.
-    private func finishOnboardingAndShowPairingCode() {
-        codex.shouldAutoReconnectOnForeground = false
-        codex.connectionRecoveryState = .idle
-        codex.lastErrorMessage = nil
-        presentManualPairingEntryAfterStoppingReconnect()
     }
 
     // Lets the scanner step back into onboarding on first run, or into the empty state later on.
@@ -355,9 +344,6 @@ struct ContentView: View {
                         showsInlineCloseButton: shouldUseFullWidthSidebar,
                         isVisible: sidebarVisible,
                         onClose: { closeSidebar() },
-                        onNewChatCreationStateChange: { isCreating in
-                            setNewChatOpeningState(isCreating)
-                        },
                         onOpenThread: { thread in
                             openThreadFromSidebar(thread)
                         }
@@ -369,14 +355,6 @@ struct ContentView: View {
                 ZStack(alignment: .leading) {
                     mainNavigationLayer
                         .frame(width: proxy.size.width, alignment: .leading)
-
-                    PetCompanionStatusSyncView()
-
-                    PetCompanionOverlay(
-                        isInteractionEnabled: !sidebarVisible,
-                        bottomExclusionHeight: 16
-                    )
-                    .frame(width: proxy.size.width, height: proxy.size.height)
 
                     if sidebarVisible {
                         (colorScheme == .dark ? Color.white : Color.black)
@@ -417,14 +395,7 @@ struct ContentView: View {
 
     @ViewBuilder
     private var mainContent: some View {
-        if isOpeningNewChatFromSidebar {
-            NewChatOpeningStateView()
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        hamburgerButton
-                    }
-                }
-        } else if let thread = selectedThread {
+        if let thread = selectedThread {
             TurnView(
                 thread: thread,
                 isWakingMacDisplayRecovery: isWakingSavedMacDisplay
@@ -447,7 +418,7 @@ struct ContentView: View {
                 statusMessage: codex.lastErrorMessage,
                 securityLabel: codex.secureConnectionState.statusLabel,
                 trustedPairPresentation: codex.trustedPairPresentation,
-                offlinePrimaryButtonTitle: codex.hasReconnectCandidate ? "Reconnect" : "Scan QR Code",
+                offlinePrimaryButtonTitle: codex.hasReconnectCandidate ? L("Reconnect", "重新连接") : L("Scan QR Code", "扫描二维码"),
                 onPrimaryAction: {
                     if homeConnectionPhase == .offline && !codex.hasReconnectCandidate {
                         presentAutomaticScanner()
@@ -461,7 +432,7 @@ struct ContentView: View {
             ) {
                 if homeConnectionPhase == .connecting || (codex.hasReconnectCandidate && !codex.isConnected) {
                     if shouldOfferWakeSavedMacDisplayAction {
-                        Button(isWakingSavedMacDisplay ? "Waking Screen..." : "Wake Screen") {
+                        Button(isWakingSavedMacDisplay ? "Waking Mac Screen..." : "Wake Mac Screen") {
                             wakeSavedMacDisplay()
                         }
                         .font(AppFont.subheadline(weight: .semibold))
@@ -525,9 +496,6 @@ struct ContentView: View {
     // Keep the wake CTA visible whenever the pairing still knows enough to try a display pulse.
     private var shouldOfferWakeSavedMacDisplayAction: Bool {
         canWakeSavedMacDisplay
-            && codex.supportsDisplayWake
-            && hasAttemptedAutomaticWakeSavedMacDisplay
-            && !isWakingSavedMacDisplay
     }
 
     // Keeps the silent wake fallback automatic exactly once per offline cycle before the user taps manually again.
@@ -538,7 +506,6 @@ struct ContentView: View {
             && !isShowingManualPairingEntry
             && codex.shouldAutoReconnectOnForeground
             && canWakeSavedMacDisplay
-            && codex.supportsDisplayWake
             && !hasAttemptedAutomaticWakeSavedMacDisplay
             && !isWakingSavedMacDisplay
     }
@@ -560,7 +527,7 @@ struct ContentView: View {
         }
 
         hasAttemptedAutomaticWakeSavedMacDisplay = true
-        await performSavedMacDisplayWakeAttempt(cancelAutoReconnectBeforeWake: false)
+        await performSavedMacDisplayWakeAttempt()
     }
 
     // Keeps foreground reconnect and the one-shot wake fallback in the same guarded path.
@@ -579,35 +546,74 @@ struct ContentView: View {
     // Resets the once-per-cycle wake gate after a fresh connection, pairing change, or app background.
     private func resetSavedMacWakeRecoveryState() {
         hasAttemptedAutomaticWakeSavedMacDisplay = false
+        clearSavedMacWakeMessageIfNeeded()
     }
 
     // Uses a temporary bridge request to wake display sleep, then unlocks the manual button only if that fails.
     private func wakeSavedMacDisplay() {
         Task { @MainActor in
-            await performSavedMacDisplayWakeAttempt(cancelAutoReconnectBeforeWake: true)
+            await performSavedMacDisplayWakeAttempt()
         }
     }
 
     // Sends one wake pulse over the best remembered pairing path without hiding the manual wake affordance.
-    private func performSavedMacDisplayWakeAttempt(cancelAutoReconnectBeforeWake: Bool) async {
-        guard codex.supportsDisplayWake, !isWakingSavedMacDisplay else { return }
+    private func performSavedMacDisplayWakeAttempt() async {
+        guard !isWakingSavedMacDisplay else { return }
         isWakingSavedMacDisplay = true
+        codex.lastErrorMessage = wakingSavedMacDisplayStatusMessage
 
         defer { isWakingSavedMacDisplay = false }
 
         do {
-            if cancelAutoReconnectBeforeWake {
-                await viewModel.stopAutoReconnectForManualRetry(codex: codex)
-            }
+            await viewModel.stopAutoReconnectForManualRetry(codex: codex)
             let handoffService = DesktopHandoffService(codex: codex)
             try await handoffService.wakeDisplay()
-            if codex.isConnected {
-                codex.schedulePostConnectSyncPass(preferredThreadId: codex.activeThreadId)
+            if codex.lastErrorMessage == wakingSavedMacDisplayStatusMessage {
+                codex.lastErrorMessage = nil
             }
         } catch {
-            // Wake failures are expected when the Mac has already gone past display sleep,
-            // so keep automatic reconnect alive instead of surfacing sticky composer errors.
+            codex.lastErrorMessage = error.localizedDescription
+            scheduleSavedMacWakeMessageDismissIfNeeded(codex.lastErrorMessage)
         }
+    }
+
+    private func clearSavedMacWakeMessageIfNeeded() {
+        guard isSavedMacWakeMessage(codex.lastErrorMessage) else {
+            return
+        }
+
+        codex.lastErrorMessage = nil
+    }
+
+    private func scheduleSavedMacWakeMessageDismissIfNeeded(_ message: String?) {
+        guard isSavedMacWakeMessage(message) else {
+            return
+        }
+
+        Task { @MainActor in
+            do {
+                try await Task.sleep(nanoseconds: wakeMessageDismissDelayNanoseconds)
+            } catch {
+                return
+            }
+
+            if codex.lastErrorMessage == message {
+                codex.lastErrorMessage = nil
+            }
+        }
+    }
+
+    private func isSavedMacWakeMessage(_ message: String?) -> Bool {
+        guard let message = message?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !message.isEmpty else {
+            return false
+        }
+
+        let lowered = message.lowercased()
+        return message == wakingSavedMacDisplayStatusMessage
+            || lowered.contains("wake your mac display")
+            || lowered.contains("wake mac display")
+            || lowered.contains("mac display")
     }
 
     // MARK: - Sidebar Geometry
@@ -660,7 +666,6 @@ struct ContentView: View {
                     finishGesture(open: true)
                 } else {
                     guard isClosingSidebarGesture(value) else { return }
-                    suppressSidebarSelectionBriefly()
                     beginSidebarGestureDebugIfNeeded(kind: "close", startX: value.startLocation.x)
                     logSidebarGestureProgressIfNeeded(translation: -value.translation.width)
                     guard -value.translation.width >= sidebarSwipeCommitDistance else { return }
@@ -703,7 +708,6 @@ struct ContentView: View {
                         resetSidebarGestureDebug()
                         return
                     }
-                    suppressSidebarSelectionBriefly()
                     debugSidebarLog(
                         "gesture #\(activeSidebarGestureDebugID ?? 0) end kind=close "
                             + "translation=\(Int(-value.translation.width)) predicted=\(Int(-value.predictedEndTranslation.width)) "
@@ -742,12 +746,6 @@ struct ContentView: View {
     }
 
     private func openThreadFromSidebar(_ thread: CodexThread) {
-        guard !shouldSuppressSidebarSelection() else {
-            debugSidebarLog("openThread suppressed by close swipe id=\(thread.id)")
-            return
-        }
-
-        isOpeningNewChatFromSidebar = false
         if isSidebarOpen || sidebarDragOffset > 0 {
             closeSidebar()
         }
@@ -755,41 +753,7 @@ struct ContentView: View {
         selectedThread = thread
         codex.activeThreadId = thread.id
         codex.markThreadAsViewed(thread.id)
-        Task { @MainActor in
-            do {
-                let restoredThread = try await codex.restorePinnedThreadIfNeeded(threadId: thread.id)
-                if let restoredThread {
-                    selectedThread = restoredThread
-                    codex.activeThreadId = restoredThread.id
-                }
-            } catch {
-                codex.lastErrorMessage = codex.userFacingTurnErrorMessageForFooter(from: error)
-            }
-
-            codex.requestImmediateActiveThreadSync(threadId: thread.id)
-        }
-    }
-
-    // Prevents a close-swipe release from also activating whichever sidebar row was under the finger.
-    private func suppressSidebarSelectionBriefly() {
-        sidebarSelectionSuppressedUntil = Date().addingTimeInterval(sidebarSelectionSuppressionDuration)
-    }
-
-    private func shouldSuppressSidebarSelection() -> Bool {
-        guard let suppressedUntil = sidebarSelectionSuppressedUntil else { return false }
-        if Date() < suppressedUntil {
-            return true
-        }
-        sidebarSelectionSuppressedUntil = nil
-        return false
-    }
-
-    private func setNewChatOpeningState(_ isOpening: Bool) {
-        isOpeningNewChatFromSidebar = isOpening
-        if isOpening {
-            selectedThread = nil
-            codex.activeThreadId = nil
-        }
+        codex.requestImmediateActiveThreadSync(threadId: thread.id)
     }
 
     // Keeps first-run installs in the scanner by default, while still letting users back out later.
@@ -858,16 +822,15 @@ struct ContentView: View {
         setSidebar(open: open)
     }
 
-    // Forces UIKit-backed inputs like the composer/search text views to resign before the drawer moves.
+    // Forces UIKit-backed inputs like the composer text view to resign before the drawer settles open.
     private func setSidebar(open: Bool) {
         debugSidebarLog(
             "setSidebar open=\(open) prewarmed=\(isSidebarPrewarmed) "
                 + "visible=\(sidebarVisible) revealWidth=\(Int(sidebarRevealWidth))"
         )
-        if !open {
-            isSearchActive = false
+        if open {
+            dismissActiveKeyboard()
         }
-        dismissActiveKeyboard()
         withAnimation(Self.sidebarSpring) {
             isSidebarOpen = open
             sidebarDragOffset = 0
@@ -926,7 +889,6 @@ struct ContentView: View {
     }
 
     private func beginSidebarGestureDebugIfNeeded(kind: String, startX: CGFloat) {
-        guard Self.isSidebarDebugLoggingEnabled else { return }
         guard activeSidebarGestureDebugID == nil else { return }
         sidebarGestureDebugSequence += 1
         activeSidebarGestureDebugID = sidebarGestureDebugSequence
@@ -938,7 +900,6 @@ struct ContentView: View {
     }
 
     private func logSidebarGestureProgressIfNeeded(translation: CGFloat) {
-        guard Self.isSidebarDebugLoggingEnabled else { return }
         guard let gestureID = activeSidebarGestureDebugID else { return }
         let bucket = max(0, Int(translation / sidebarGestureLogBucketWidth))
         guard bucket != lastSidebarGestureLogBucket else { return }
@@ -954,12 +915,8 @@ struct ContentView: View {
         lastSidebarGestureLogBucket = nil
     }
 
-    // Gesture and lifecycle logs are lazy so release builds do not build strings on hot paths.
-    private func debugSidebarLog(_ message: @autoclosure () -> String) {
-        #if DEBUG
-        guard Self.isSidebarDebugLoggingEnabled else { return }
-        print("[SidebarDebug] \(message())")
-        #endif
+    private func debugSidebarLog(_ message: String) {
+        print("[SidebarDebug] \(message)")
     }
 
     // Uses the responder chain instead of per-view bindings so mixed SwiftUI/UIKit inputs all close together.
@@ -1262,12 +1219,12 @@ struct ContentView: View {
     // Keeps QR and code recovery as one quiet secondary row under the main reconnect CTA.
     private var reconnectSecondaryActions: some View {
         HStack(spacing: 10) {
-            secondaryReconnectActionButton("New QR Code") {
+            secondaryReconnectActionButton(L("New QR Code", "新的二维码")) {
                 presentManualScannerAfterStoppingReconnect()
             }
             .disabled(isPreparingManualScanner)
 
-            secondaryReconnectActionButton("Pair with Code") {
+            secondaryReconnectActionButton(L("Pair with Code", "使用配对码")) {
                 presentManualPairingEntryAfterStoppingReconnect()
             }
             .disabled(isPreparingManualScanner || isResolvingManualPairingCode)
@@ -1276,7 +1233,7 @@ struct ContentView: View {
 
     // Keeps the destructive saved-pair action visually separate from the reconnect controls.
     private var reconnectFooterAction: some View {
-        Button("Forget Pair") {
+        Button(L("Forget Pair", "忘记配对")) {
             codex.forgetReconnectCandidate()
         }
         .font(AppFont.caption(weight: .semibold))
@@ -1341,12 +1298,6 @@ struct ContentView: View {
                 let pairingPayload = try await codex.resolvePairingCode(pendingCode)
                 isShowingManualPairingEntry = false
                 manualPairingCode = ""
-                withAnimation {
-                    hasSeenOnboarding = true
-                    isShowingManualScanner = false
-                    hasDismissedAutomaticScanner = true
-                    scannerCanReturnToOnboarding = false
-                }
                 await viewModel.connectToRelay(
                     pairingPayload: pairingPayload,
                     codex: codex
@@ -1405,7 +1356,17 @@ struct ContentView: View {
 
     // Keeps selected thread coherent with server list updates.
     private func syncSelectedThread(with threads: [CodexThread]) {
-        guard !isOpeningNewChatFromSidebar else { return }
+        if let activeThreadId = codex.activeThreadId,
+           let activeThread = threads.first(where: { $0.id == activeThreadId }) {
+            if selectedThread?.id != activeThread.id {
+                selectedThread = activeThread
+            }
+            return
+        }
+
+        if codex.activeThreadId != nil {
+            codex.activeThreadId = nil
+        }
 
         if let selected = selectedThread,
            !threads.contains(where: { $0.id == selected.id }) {
@@ -1428,29 +1389,6 @@ struct ContentView: View {
            let first = threads.first {
             selectedThread = first
         }
-    }
-}
-
-private struct NewChatOpeningStateView: View {
-    var body: some View {
-        VStack(spacing: 14) {
-            ProgressView()
-                .controlSize(.regular)
-
-            VStack(spacing: 4) {
-                Text("Starting new chat...")
-                    .font(AppFont.headline())
-                    .foregroundStyle(.primary)
-
-                Text("Preparing an empty conversation.")
-                    .font(AppFont.caption())
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
-        .navigationTitle("New Chat")
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

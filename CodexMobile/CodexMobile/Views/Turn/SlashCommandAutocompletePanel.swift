@@ -74,9 +74,9 @@ struct SlashCommandAutocompletePanel: View {
                                 commandIcon(for: item, isEnabled: isEnabled)
 
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(item.commandToken)
+                                    Text(item.title)
                                         .font(AppFont.subheadline(weight: .semibold))
-                                        .foregroundStyle(commandPrimaryStyle(isEnabled: isEnabled))
+                                        .foregroundStyle(isEnabled ? .primary : .secondary)
                                         .lineLimit(1)
 
                                     Text(commandSubtitle(for: item))
@@ -87,7 +87,7 @@ struct SlashCommandAutocompletePanel: View {
 
                                 Spacer(minLength: 8)
 
-                                Text(item.title)
+                                Text(item.commandToken)
                                     .font(AppFont.footnote())
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
@@ -237,19 +237,15 @@ struct SlashCommandAutocompletePanel: View {
                 .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
-                .foregroundStyle(commandPrimaryStyle(isEnabled: isEnabled))
+                .foregroundStyle(isEnabled ? .primary : .secondary)
                 .frame(width: 16, height: 16)
                 .frame(width: 22)
         } else {
             Image(systemName: command.symbolName)
                 .font(AppFont.system(size: 15, weight: .semibold))
-                .foregroundStyle(commandPrimaryStyle(isEnabled: isEnabled))
+                .foregroundStyle(isEnabled ? .primary : .secondary)
                 .frame(width: 22)
         }
-    }
-
-    private func commandPrimaryStyle(isEnabled: Bool) -> Color {
-        isEnabled ? .primary : .secondary
     }
 
     @ViewBuilder
@@ -303,8 +299,6 @@ struct SlashCommandAutocompletePanel: View {
         switch command {
         case .codeReview:
             return !hasComposerContentConflictingWithReview
-        case .compact:
-            return !isThreadRunning
         case .feedback:
             return true
         case .fork:
@@ -317,7 +311,7 @@ struct SlashCommandAutocompletePanel: View {
     }
 
     private func commandSubtitle(for command: TurnComposerSlashCommand) -> String {
-        if (command == .compact || command == .fork), isThreadRunning {
+        if command == .fork, isThreadRunning {
             return "Wait for the current response to finish first"
         }
 

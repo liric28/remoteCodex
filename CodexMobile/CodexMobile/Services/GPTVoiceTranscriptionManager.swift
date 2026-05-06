@@ -289,7 +289,7 @@ final class GPTVoiceTranscriptionManager: ObservableObject {
             try audioSession.setCategory(
                 .playAndRecord,
                 mode: .default,
-                options: [.defaultToSpeaker, .allowBluetoothHFP]
+                options: [.defaultToSpeaker, .allowBluetooth]
             )
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
 

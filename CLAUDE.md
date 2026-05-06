@@ -43,6 +43,7 @@ This repo is local-first now. Do not reintroduce hosted-service assumptions, rem
 - Do not run Xcode tests unless the user explicitly asks. Do not decide to run them on your own.
 - Markdown files inside Xcode-synced groups can still produce harmless warnings.
 - For small iOS/mobile fixes, prefer inspection and targeted edits over simulator runs by default.
+- For build/install/release/deploy tasks, work backward from the concrete outcome and verify each critical step with direct evidence before declaring success. Do not rely on assumptions, stale artifacts, partial logs, or “probably/already/should be” reasoning; confirm the exact artifact, timestamp, bundle, target device, and user-visible result when relevant.
 
 ## Local quick runbook
 
