@@ -187,6 +187,26 @@ extension CodexService {
         }
     }
 
+    func sendRequest(
+        method: String,
+        params: JSONValue?,
+        timeoutNanoseconds: UInt64
+    ) async throws -> RPCMessage {
+        try await withThrowingTaskGroup(of: RPCMessage.self) { group in
+            group.addTask {
+                try await self.sendRequest(method: method, params: params)
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: timeoutNanoseconds)
+                throw CodexServiceError.invalidInput("Request timed out for \(method)")
+            }
+
+            let result = try await group.next()!
+            group.cancelAll()
+            return result
+        }
+    }
+
     // Sends a fire-and-forget RPC notification.
     func sendNotification(method: String, params: JSONValue?) async throws {
         let notification = RPCMessage(

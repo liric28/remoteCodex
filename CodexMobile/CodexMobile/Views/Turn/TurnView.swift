@@ -91,6 +91,9 @@ struct TurnView: View {
         let onTapRepoDiff: (() -> Void)? = showsGitControls ? {
             presentRepositoryDiff(workingDirectory: gitWorkingDirectory)
         } : nil
+        let canLoadRemoteOlderMessages = codex.canLoadOlderThreadHistory(threadId: thread.id)
+        let isLoadingRemoteOlderMessages = codex.isLoadingOlderThreadHistory(threadId: thread.id)
+        let remoteOlderMessagesError = codex.olderHistoryLoadErrorByThreadID[thread.id]
 
         return TurnConversationContainerView(
                 threadID: thread.id,
@@ -99,12 +102,16 @@ struct TurnView: View {
                 activeTurnID: activeTurnID,
                 isThreadRunning: isThreadRunning,
                 latestTurnTerminalState: renderSnapshot.latestTurnTerminalState,
+                currentWorkingDirectory: gitWorkingDirectory,
                 completedTurnIDs: renderSnapshot.completedTurnIDs,
                 stoppedTurnIDs: renderSnapshot.stoppedTurnIDs,
                 assistantRevertStatesByMessageID: renderSnapshot.assistantRevertStatesByMessageID,
                 planSessionSource: planSessionSource,
                 allowsAssistantPlanFallbackRecovery: planSessionSource == .compatibilityFallback,
                 threadMessagesForPlanMatching: renderSnapshot.planMatchingMessages,
+                canLoadRemoteOlderMessages: canLoadRemoteOlderMessages,
+                isLoadingRemoteOlderMessages: isLoadingRemoteOlderMessages,
+                remoteOlderMessagesError: remoteOlderMessagesError,
                 errorMessage: codex.lastErrorMessage,
                 composerRecoveryAccessory: composerRecoveryAccessory,
                 shouldAnchorToAssistantResponse: shouldAnchorToAssistantResponseBinding,
@@ -112,6 +119,11 @@ struct TurnView: View {
                 isComposerFocused: isInputFocused,
                 isComposerAutocompletePresented: isComposerAutocompletePresented,
                 emptyState: resolvedEmptyConversationState,
+                onLoadOlderMessages: {
+                    Task { @MainActor in
+                        await codex.loadOlderThreadHistoryPage(threadId: thread.id)
+                    }
+                },
                 composer: AnyView(composerWithSubagentAccessory(
                     currentThread: resolvedThread,
                     activeTurnID: activeTurnID,

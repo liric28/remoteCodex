@@ -289,6 +289,37 @@ extension CodexService {
         return result
     }
 
+    // Extracts persisted turn outcomes from canonical history so render grouping survives app relaunch.
+    func decodeTurnTerminalStatesFromThreadRead(_ threadObject: [String: JSONValue]) -> [String: CodexTurnTerminalState] {
+        let turns = threadObject["turns"]?.arrayValue ?? []
+        var result: [String: CodexTurnTerminalState] = [:]
+
+        for turnValue in turns {
+            guard let turnObject = turnValue.objectValue,
+                  let turnID = turnObject["id"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !turnID.isEmpty,
+                  let terminalState = historyTurnTerminalState(turnObject) else {
+                continue
+            }
+            result[turnID] = terminalState
+        }
+
+        return result
+    }
+
+    func historyTurnTerminalState(_ turnObject: [String: JSONValue]) -> CodexTurnTerminalState? {
+        let statusObject = turnObject["status"]?.objectValue
+        let rawStatus = firstNonEmptyString([
+            turnObject["status"]?.stringValue,
+            statusObject?["type"]?.stringValue,
+            statusObject?["statusType"]?.stringValue,
+            statusObject?["status_type"]?.stringValue,
+            turnObject["result"]?.stringValue,
+        ]) ?? ""
+
+        return threadTerminalState(from: normalizeThreadStatusType(rawStatus))
+    }
+
     func decodeHistoryBaseDate(from threadObject: [String: JSONValue]) -> Date {
         if let rawCreatedAt = threadObject["createdAt"]?.doubleValue {
             return decodeUnixTimestamp(rawCreatedAt)

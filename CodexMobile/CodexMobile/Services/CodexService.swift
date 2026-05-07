@@ -36,6 +36,12 @@ struct CodexThreadResumeRequestSignature: Equatable, Sendable {
     let modelIdentifier: String?
 }
 
+struct CodexThreadHistoryPaginationState: Codable, Equatable, Sendable {
+    var olderCursor: JSONValue?
+    var exhaustedOlderCursor: JSONValue?
+    var hasAuthoritativeLocalHistoryStart: Bool
+}
+
 struct CodexSubagentIdentityEntry: Equatable, Sendable {
     var threadId: String?
     var agentId: String?
@@ -368,6 +374,8 @@ final class CodexService {
     var supportsBridgeVoiceAuth = true
     // Runtime compatibility flag for native `thread/fork` conversation branching.
     var supportsThreadFork = true
+    // Runtime compatibility flag for `thread/turns/list` and `excludeTurns`.
+    var supportsTurnPagination = true
     // Seeds brand-new chats with one-shot composer actions like code review.
     var pendingComposerActionByThreadID: [String: CodexPendingThreadComposerAction] = [:]
     // In-memory identity directory for subagents, keyed by thread id and agent id.
@@ -444,6 +452,13 @@ final class CodexService {
     var threadIdByTurnID: [String: String] = [:]
     var hydratedThreadIDs: Set<String> = []
     var loadingThreadIDs: Set<String> = []
+    var olderThreadHistoryCursorByThreadID: [String: JSONValue] = [:]
+    var exhaustedOlderThreadHistoryCursorByThreadID: [String: JSONValue] = [:]
+    var loadingOlderThreadHistoryIDs: Set<String> = []
+    var threadTimelineProjectionLimitByThreadID: [String: Int] = [:]
+    var initialTurnsLoadedByThreadID: Set<String> = []
+    var threadsWithAuthoritativeLocalHistoryStart: Set<String> = []
+    var olderHistoryLoadErrorByThreadID: [String: String] = [:]
     @ObservationIgnored var subagentMetadataLoadingThreadIDs: Set<String> = []
     var resumedThreadIDs: Set<String> = []
     // Coalesces per-thread thread/read history fetches so reconcile work can await the same RPC.
@@ -519,6 +534,7 @@ final class CodexService {
     var aiChangeSetsByID: [String: AIChangeSet] = [:]
     var aiChangeSetIDByTurnID: [String: String] = [:]
     var aiChangeSetIDByAssistantMessageID: [String: String] = [:]
+    @ObservationIgnored var workspaceCheckpointCopyTaskByTurnID: [String: Task<Void, Never>] = [:]
     // Keeps hot-path thread lookups O(1) instead of rescanning the full sidebar list.
     @ObservationIgnored var threadByID: [String: CodexThread] = [:]
     @ObservationIgnored var threadIndexByID: [String: Int] = [:]
@@ -562,6 +578,7 @@ final class CodexService {
     static let forkedThreadOriginsDefaultsKey = "codex.forkedThreadOrigins"
     static let renamedThreadNamesDefaultsKey = "codex.renamedThreadNames"
     static let associatedManagedWorktreePathsDefaultsKey = "codex.associatedManagedWorktreePaths"
+    static let threadHistoryPaginationStateDefaultsKey = "codex.threadHistoryPaginationState"
     static let notificationsPromptedDefaultsKey = "codex.notifications.prompted"
     static let keepMacAwakeWhileBridgeRunsDefaultsKey = "codex.keepMacAwakeWhileBridgeRuns"
     static let streamAssistantDeltasInBatchesDefaultsKey = "codex.streamAssistantDeltasInBatches"
@@ -662,6 +679,22 @@ final class CodexService {
             self.associatedManagedWorktreePathByThreadID = decodedAssociatedManagedWorktreePaths
         } else {
             self.associatedManagedWorktreePathByThreadID = [:]
+        }
+
+        if let savedThreadHistoryPaginationState = defaults.data(
+            forKey: Self.threadHistoryPaginationStateDefaultsKey
+        ),
+           let decodedThreadHistoryPaginationState = try? decoder.decode(
+               [String: CodexThreadHistoryPaginationState].self,
+               from: savedThreadHistoryPaginationState
+           ) {
+            self.olderThreadHistoryCursorByThreadID = decodedThreadHistoryPaginationState.compactMapValues(\.olderCursor)
+            self.exhaustedOlderThreadHistoryCursorByThreadID = decodedThreadHistoryPaginationState.compactMapValues(\.exhaustedOlderCursor)
+            self.threadsWithAuthoritativeLocalHistoryStart = Set(
+                decodedThreadHistoryPaginationState.compactMap { threadId, state in
+                    state.hasAuthoritativeLocalHistoryStart ? threadId : nil
+                }
+            )
         }
 
         let savedServiceTier = defaults.string(forKey: Self.selectedServiceTierDefaultsKey)?

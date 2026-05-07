@@ -157,6 +157,7 @@ extension CodexService {
         hasPresentedServiceTierBridgeUpdatePrompt = false
         supportsBridgeVoiceAuth = true
         supportsThreadFork = true
+        supportsTurnPagination = true
         hasPresentedThreadForkBridgeUpdatePrompt = false
         hasPresentedMinimumBridgePackageUpdatePrompt = false
         lastPresentedAvailableBridgePackageVersion = nil
@@ -296,11 +297,12 @@ extension CodexService {
         ])
 
         do {
-            _ = try await sendRequest(method: "initialize", params: modernParams)
+            let response = try await sendRequest(method: "initialize", params: modernParams)
             // A successful modern initialize means the runtime accepted the experimental
             // capability negotiation. Keep plan-mode sends enabled unless the runtime
             // explicitly rejects `collaborationMode` on a turn request later.
             supportsTurnCollaborationMode = true
+            learnTurnPaginationSupportFromInitializeResponse(response)
             debugRuntimeLog("initialize success experimentalApi=true")
 
             let runtimeReportedPlanSupport = await runtimeSupportsPlanCollaborationMode()
@@ -323,7 +325,8 @@ extension CodexService {
                 "clientInfo": clientInfo,
             ])
             do {
-                _ = try await sendRequest(method: "initialize", params: legacyParams)
+                let response = try await sendRequest(method: "initialize", params: legacyParams)
+                learnTurnPaginationSupportFromInitializeResponse(response)
             } catch {
                 if let incompatibleAppVersionError = incompatibleBridgeAppVersionError(from: error) {
                     throw incompatibleAppVersionError
@@ -518,6 +521,7 @@ extension CodexService {
         hasPresentedServiceTierBridgeUpdatePrompt = false
         supportsBridgeVoiceAuth = true
         supportsThreadFork = true
+        supportsTurnPagination = true
         hasPresentedThreadForkBridgeUpdatePrompt = false
         hasPresentedMinimumBridgePackageUpdatePrompt = false
         lastPresentedAvailableBridgePackageVersion = nil

@@ -34,6 +34,130 @@ struct CommandExecutionStatusModel {
     let accent: CommandExecutionStatusAccent
 }
 
+struct AssistantMarkdownImageReference: Identifiable, Equatable {
+    let id: String
+    let path: String
+    let altText: String
+
+    init(path: String, altText: String, occurrenceIndex: Int) {
+        self.id = "\(occurrenceIndex)|\(path)"
+        self.path = path
+        self.altText = altText
+    }
+
+    var fileName: String {
+        let basename = (path as NSString).lastPathComponent
+        return basename.isEmpty ? path : basename
+    }
+}
+
+enum AssistantMarkdownImageReferenceParser {
+    private static let markdownImageRegex = try? NSRegularExpression(pattern: #"!\[([^\]]*)\]\(([^)]+)\)"#)
+    private static let imageExtensions: Set<String> = [
+        "jpg", "jpeg", "png", "gif", "webp", "heic", "heif",
+    ]
+
+    static func references(in text: String) -> [AssistantMarkdownImageReference] {
+        var references: [AssistantMarkdownImageReference] = []
+        var isInsideFence = false
+        var occurrenceIndex = 0
+
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+            if isFenceDelimiter(line) {
+                isInsideFence.toggle()
+                continue
+            }
+            guard !isInsideFence else {
+                continue
+            }
+
+            references.append(contentsOf: validImageMatches(in: line).map { match in
+                defer { occurrenceIndex += 1 }
+                return AssistantMarkdownImageReference(
+                    path: match.path,
+                    altText: match.altText,
+                    occurrenceIndex: occurrenceIndex
+                )
+            })
+        }
+
+        return references
+    }
+
+    static func visibleTextRemovingImageSyntax(from text: String) -> String {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var isInsideFence = false
+        let transformedLines = lines.compactMap { line -> String? in
+            if isFenceDelimiter(line) {
+                isInsideFence.toggle()
+                return line
+            }
+            guard !isInsideFence else {
+                return line
+            }
+
+            let matches = validImageMatches(in: line)
+            guard !matches.isEmpty else {
+                return line
+            }
+
+            let transformedLine = NSMutableString(string: line)
+            for match in matches.reversed() {
+                transformedLine.replaceCharacters(in: match.range, with: "")
+            }
+
+            let nextLine = String(transformedLine)
+                .replacingOccurrences(of: "  ", with: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return nextLine.isEmpty ? nil : nextLine
+        }
+
+        return transformedLines.joined(separator: "\n")
+    }
+
+    private static func markdownImageMatches(in text: String) -> [(range: NSRange, altText: String, path: String)] {
+        guard let regex = markdownImageRegex else {
+            return []
+        }
+
+        let nsText = text as NSString
+        let protectedRanges = TurnMessageRegexCache.inlineCodeRanges(in: text)
+        return regex.matches(in: text, range: NSRange(location: 0, length: nsText.length)).compactMap { match in
+            guard !TurnMessageRegexCache.rangeOverlaps(match.range, protectedRanges: protectedRanges) else {
+                return nil
+            }
+            guard match.numberOfRanges > 2 else { return nil }
+            let alt = nsText.substring(with: match.range(at: 1))
+            let path = nsText.substring(with: match.range(at: 2))
+            return (match.range, alt, normalizedImagePath(path))
+        }
+    }
+
+    private static func validImageMatches(in text: String) -> [(range: NSRange, altText: String, path: String)] {
+        markdownImageMatches(in: text).filter { isImagePath($0.path) }
+    }
+
+    private static func isFenceDelimiter(_ line: String) -> Bool {
+        line.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("```")
+    }
+
+    private static func normalizedImagePath(_ raw: String) -> String {
+        var candidate = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'`<>"))
+
+        if candidate.hasPrefix("file://") {
+            candidate = String(candidate.dropFirst("file://".count))
+        }
+        return candidate.removingPercentEncoding ?? candidate
+    }
+
+    private static func isImagePath(_ path: String) -> Bool {
+        let ext = (path as NSString).pathExtension.lowercased()
+        return imageExtensions.contains(ext)
+    }
+}
+
 // MARK: - Card Body
 
 struct CommandExecutionCardBody: View {
