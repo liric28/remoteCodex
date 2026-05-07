@@ -511,7 +511,7 @@ private extension CodexService {
         }
     }
 
-    func shouldTrustExistingCacheAsPrePaginationFullHistory(
+    private func shouldTrustExistingCacheAsPrePaginationFullHistory(
         threadId: String,
         existingMessages: [CodexMessage],
         paginatedMessages: [CodexMessage],
@@ -553,9 +553,7 @@ private extension CodexService {
 
     func localCacheStartsAtThreadCreation(threadId: String, existingMessages: [CodexMessage]) -> Bool {
         guard let threadCreatedAt = thread(for: threadId)?.createdAt,
-              CodexTimestampParser.isTrustworthyServerDate(threadCreatedAt),
-              let oldestMessageDate = existingMessages.map(\.createdAt).min(),
-              CodexTimestampParser.isTrustworthyServerDate(oldestMessageDate) else {
+              let oldestMessageDate = existingMessages.map(\.createdAt).min() else {
             return false
         }
 

@@ -100,8 +100,20 @@ extension CodexService {
     // Treats placeholder-only chats as intentionally blank so the UI does not flash
     // a loading state before the thread-open preparation path can confirm the skip.
     func shouldShowImmediateEmptyPlaceholder(threadId: String) -> Bool {
-        guard !threadHasActiveOrRunningTurn(threadId),
-              messages(for: threadId).isEmpty,
+        shouldShowImmediateEmptyPlaceholder(
+            threadId: threadId,
+            hasVisibleMessages: !messages(for: threadId).isEmpty,
+            isThreadRunning: threadHasActiveOrRunningTurn(threadId)
+        )
+    }
+
+    func shouldShowImmediateEmptyPlaceholder(
+        threadId: String,
+        hasVisibleMessages: Bool,
+        isThreadRunning: Bool
+    ) -> Bool {
+        guard !isThreadRunning,
+              !hasVisibleMessages,
               let thread = thread(for: threadId),
               thread.syncState == .live else {
             return false
@@ -651,6 +663,48 @@ extension CodexService {
             && !hasAssistantOutput
     }
 
+    func shouldPreserveExistingPrePaginationHistoryCache(
+        threadId: String,
+        existingMessages: [CodexMessage],
+        paginatedMessages: [CodexMessage],
+        hadInitialTurnsLoadedBeforeRefresh: Bool,
+        hadAuthoritativeLocalStartBeforeRefresh: Bool
+    ) -> Bool {
+        guard !hadInitialTurnsLoadedBeforeRefresh,
+              !hadAuthoritativeLocalStartBeforeRefresh,
+              !paginatedMessages.isEmpty,
+              existingMessages.count > paginatedMessages.count else {
+            return false
+        }
+
+        let existingItemIDs = Set(existingMessages.compactMap { Self.normalizedHistoryIdentifier($0.itemId) })
+        let existingKeys = Set(existingMessages.map(Self.historyMessageKey(for:)))
+        let exactOverlapCount = paginatedMessages.reduce(into: 0) { count, message in
+            if let itemID = Self.normalizedHistoryIdentifier(message.itemId),
+               existingItemIDs.contains(itemID) {
+                count += 1
+                return
+            }
+            if existingKeys.contains(Self.historyMessageKey(for: message)) {
+                count += 1
+            }
+        }
+
+        guard let threadCreatedAt = thread(for: threadId)?.createdAt,
+              let oldestMessageDate = existingMessages.map(\.createdAt).min() else {
+            return false
+        }
+
+        let localHasSubstantialPrefix = existingMessages.count >= max(
+            TurnTimelineProjectionPolicy.initialMessageLimit,
+            paginatedMessages.count * 2
+        )
+
+        return oldestMessageDate <= threadCreatedAt.addingTimeInterval(180)
+            && localHasSubstantialPrefix
+            && exactOverlapCount > 0
+    }
+
     // Prefers the locally persisted transcript when a non-running thread is already huge.
     // The active sync loop can still refresh lighter chats, but giant histories should not
     // block first paint or crash the device just because the user tapped the row.
@@ -969,7 +1023,7 @@ extension CodexService {
                         historyCount: historyMessages.count
                     )
                 if loadedViaPagination,
-                   shouldTrustExistingCacheAsPrePaginationFullHistory(
+                   shouldPreserveExistingPrePaginationHistoryCache(
                     threadId: threadId,
                     existingMessages: existingMessages,
                     paginatedMessages: historyMessages,
@@ -3160,6 +3214,21 @@ extension CodexService {
                 messagePersistence.save(snapshot)
             }
         }
+    }
+
+    // Persists per-turn terminal state so completed-turn grouping survives app relaunch.
+    func persistTurnTerminalStates() {
+        guard !terminalStateByTurnID.isEmpty else {
+            defaults.removeObject(forKey: Self.turnTerminalStatesDefaultsKey)
+            return
+        }
+
+        guard let data = try? encoder.encode(terminalStateByTurnID) else {
+            defaults.removeObject(forKey: Self.turnTerminalStatesDefaultsKey)
+            return
+        }
+
+        defaults.set(data, forKey: Self.turnTerminalStatesDefaultsKey)
     }
 }
 

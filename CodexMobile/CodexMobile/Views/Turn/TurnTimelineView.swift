@@ -433,6 +433,7 @@ struct TurnTimelineView<EmptyState: View, Composer: View>: View {
     let isComposerFocused: Bool
     let isComposerAutocompletePresented: Bool
 
+    let onLoadEarlierMessages: () -> Void
     let onRetryUserMessage: (String) -> Void
     let onTapAssistantRevert: (CodexMessage) -> Void
     let onTapSubagent: (CodexSubagentThreadPresentation) -> Void

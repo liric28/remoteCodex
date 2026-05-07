@@ -119,11 +119,6 @@ struct TurnView: View {
                 isComposerFocused: isInputFocused,
                 isComposerAutocompletePresented: isComposerAutocompletePresented,
                 emptyState: resolvedEmptyConversationState,
-                onLoadOlderMessages: {
-                    Task { @MainActor in
-                        await codex.loadOlderThreadHistoryPage(threadId: thread.id)
-                    }
-                },
                 composer: AnyView(composerWithSubagentAccessory(
                     currentThread: resolvedThread,
                     activeTurnID: activeTurnID,
@@ -142,6 +137,11 @@ struct TurnView: View {
                 onRetryUserMessage: { messageText in
                     viewModel.input = messageText
                     isInputFocused = true
+                },
+                onLoadOlderMessages: {
+                    Task { @MainActor in
+                        await codex.loadOlderThreadHistoryPage(threadId: thread.id)
+                    }
                 },
                 onTapAssistantRevert: { message in
                     startAssistantRevertPreview(message: message, gitWorkingDirectory: gitWorkingDirectory)

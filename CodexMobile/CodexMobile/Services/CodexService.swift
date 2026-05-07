@@ -199,7 +199,7 @@ enum CodexNotificationPayloadKeys {
 }
 
 // Tracks the real terminal outcome of a run, including user interruption.
-enum CodexTurnTerminalState: String, Equatable, Sendable {
+enum CodexTurnTerminalState: String, Codable, Equatable, Sendable {
     case completed
     case failed
     case stopped
@@ -578,6 +578,7 @@ final class CodexService {
     static let forkedThreadOriginsDefaultsKey = "codex.forkedThreadOrigins"
     static let renamedThreadNamesDefaultsKey = "codex.renamedThreadNames"
     static let associatedManagedWorktreePathsDefaultsKey = "codex.associatedManagedWorktreePaths"
+    static let turnTerminalStatesDefaultsKey = "codex.turnTerminalStates"
     static let threadHistoryPaginationStateDefaultsKey = "codex.threadHistoryPaginationState"
     static let notificationsPromptedDefaultsKey = "codex.notifications.prompted"
     static let keepMacAwakeWhileBridgeRunsDefaultsKey = "codex.keepMacAwakeWhileBridgeRuns"
@@ -695,6 +696,16 @@ final class CodexService {
                     state.hasAuthoritativeLocalHistoryStart ? threadId : nil
                 }
             )
+        }
+
+        if let savedTurnTerminalStates = defaults.data(forKey: Self.turnTerminalStatesDefaultsKey),
+           let decodedTurnTerminalStates = try? decoder.decode(
+               [String: CodexTurnTerminalState].self,
+               from: savedTurnTerminalStates
+           ) {
+            self.terminalStateByTurnID = decodedTurnTerminalStates
+        } else {
+            self.terminalStateByTurnID = [:]
         }
 
         let savedServiceTier = defaults.string(forKey: Self.selectedServiceTierDefaultsKey)?
