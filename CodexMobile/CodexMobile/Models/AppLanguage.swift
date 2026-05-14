@@ -168,6 +168,7 @@ private let exactLocalizedAppMessages: [String: String] = [
     "The trusted Mac relay returned an invalid response.": "可信 Mac 中继返回了无效响应。",
     "The trusted Mac relay returned malformed session data.": "可信 Mac 中继返回了格式错误的会话数据。",
     "This iPhone is no longer trusted by the Mac. Scan a new QR code to reconnect.": "这台 iPhone 已不再被 Mac 信任。请扫描新的二维码重新连接。",
+    "Trusted reconnect verification failed. Try reconnecting again.": "可信重连校验失败。请再次尝试重新连接。",
     "The trusted reconnect request expired. Try reconnecting again.": "可信重连请求已过期。请再次尝试重新连接。",
     "The trusted Mac relay could not resolve the current bridge session.": "可信 Mac 中继无法解析当前桥接会话。",
     "Camera is not available on this device.": "此设备不可使用相机。",
