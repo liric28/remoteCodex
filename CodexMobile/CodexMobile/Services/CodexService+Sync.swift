@@ -507,6 +507,10 @@ extension CodexService {
     func clearHydrationCaches() {
         hydratedThreadIDs.removeAll()
         loadingThreadIDs.removeAll()
+        loadingOlderThreadHistoryIDs.removeAll()
+        threadTimelineProjectionLimitByThreadID.removeAll()
+        initialTurnsLoadedByThreadID.removeAll()
+        olderHistoryLoadErrorByThreadID.removeAll()
         cancelAllPerThreadRefreshWork()
     }
 
@@ -529,10 +533,12 @@ extension CodexService {
     func cancelPerThreadRefreshWork(for threadId: String) {
         invalidatePerThreadRefreshGeneration(for: threadId)
         loadingThreadIDs.remove(threadId)
+        loadingOlderThreadHistoryIDs.remove(threadId)
         threadHistoryLoadTaskByThreadID[threadId]?.cancel()
         threadHistoryLoadTaskByThreadID.removeValue(forKey: threadId)
         forcedHistoryLoadThreadIDs.remove(threadId)
         deferHydratedMarkForNotMaterializedThreadIDs.remove(threadId)
+        olderHistoryLoadErrorByThreadID.removeValue(forKey: threadId)
         threadResumeTaskByThreadID[threadId]?.cancel()
         threadResumeTaskByThreadID.removeValue(forKey: threadId)
         threadResumeRequestSignatureByThreadID.removeValue(forKey: threadId)
@@ -562,10 +568,12 @@ extension CodexService {
             .union(canonicalHistoryReconcileRetryTaskByThreadID.keys)
         invalidatedThreadIDs.forEach { invalidatePerThreadRefreshGeneration(for: $0) }
         loadingThreadIDs.removeAll()
+        loadingOlderThreadHistoryIDs.removeAll()
         threadHistoryLoadTaskByThreadID.values.forEach { $0.cancel() }
         threadHistoryLoadTaskByThreadID.removeAll()
         forcedHistoryLoadThreadIDs.removeAll()
         deferHydratedMarkForNotMaterializedThreadIDs.removeAll()
+        olderHistoryLoadErrorByThreadID.removeAll()
         threadResumeTaskByThreadID.values.forEach { $0.cancel() }
         threadResumeTaskByThreadID.removeAll()
         threadResumeRequestSignatureByThreadID.removeAll()

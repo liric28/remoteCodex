@@ -714,10 +714,15 @@ private extension CodexService {
         case "session_unavailable":
             secureConnectionState = .liveSessionUnresolved
             throw CodexTrustedSessionResolveError.macOffline("Your trusted Mac is offline right now.")
-        case "phone_not_trusted", "invalid_signature":
+        case "phone_not_trusted":
             secureConnectionState = .rePairRequired
             throw CodexTrustedSessionResolveError.rePairRequired(
                 "This iPhone is no longer trusted by the Mac. Scan a new QR code to reconnect."
+            )
+        case "invalid_signature":
+            secureConnectionState = .liveSessionUnresolved
+            throw CodexTrustedSessionResolveError.network(
+                "Trusted reconnect verification failed. Try reconnecting again."
             )
         case "resolve_request_replayed", "resolve_request_expired":
             throw CodexTrustedSessionResolveError.network(

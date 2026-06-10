@@ -89,6 +89,8 @@ This repo contains the local bridge, the iOS app target, and their tests:
 │   └── BuildSupport/             # Info.plist, xcconfig defaults, and local override templates
 ```
 
+If you maintain a customized fork and need to catch up with large upstream updates, see the fork-maintenance playbook in [`Docs/upstream-integration-playbook.md`](Docs/upstream-integration-playbook.md).
+
 ## Prerequisites
 
 - **Node.js** v18+
@@ -97,6 +99,37 @@ This repo contains the local bridge, the iOS app target, and their tests:
 - **A signed Remodex iOS build** installed on your iPhone or iPad before scanning the pairing QR
 - **macOS** (for desktop refresh features — the core bridge works on any OS)
 - **Xcode 16+** (only if building the iOS app from source)
+
+## Version Compatibility
+
+Remodex does **not** require every visible version number to be identical.
+
+What matters is compatibility, not perfect version-number alignment:
+
+- **Bridge package version** and **iPhone app version** do not need to be the same string
+- **System versions** do not need to match either of those
+- The parts that must remain compatible are:
+  - the bridge/app minimum supported versions
+  - the secure transport protocol version used during pairing/reconnect
+  - the platform minimums required to build and run the app
+
+Current compatibility rules in this repository:
+
+- The iPhone app requires Remodex bridge **`1.3.5` or newer**
+- Bridge **`1.3.8` or newer** requires Remodex iPhone **`1.1` or newer**
+- If the secure transport protocol version differs between the phone and the bridge, the connection is rejected until one side is updated
+
+Practical guidance:
+
+- If you are using published builds/packages, the bridge and iPhone app do **not** need matching marketing versions
+- If you are developing a customized fork, the safest path is to build the iPhone app and install the bridge from the **same integration branch**
+- If you see pairing or reconnect failures after upgrading only one side, update the other side before debugging deeper
+
+Platform notes:
+
+- The current iPhone app target in this repo is **iOS 18.6**
+- Building from source currently assumes **Xcode 16+**
+- The built-in background bridge service / trusted reconnect path is **macOS-only**
 
 ## Install the Bridge
 
@@ -196,7 +229,7 @@ If you point `REMODEX_RELAY` at your own self-hosted relay, managed push stays o
 
 Published npm packages can embed default private relay settings at pack time via the `prepack` script.
 
-The current package version is `1.3.4`.
+The source-of-truth bridge package version lives in [`phodex-bridge/package.json`](phodex-bridge/package.json). Avoid hard-coding that value in fork documentation, because it will drift over time.
 
 To publish the bridge with `api.phodex.app` as the default relay:
 
@@ -267,7 +300,7 @@ Prints the installed Remodex CLI version.
 
 ```sh
 remodex --version
-# => 1.3.4
+# => 1.5.0
 ```
 
 ### `remodex reset-pairing`

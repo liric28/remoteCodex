@@ -128,6 +128,7 @@ enum TurnTimelineRenderProjection {
 
 private struct TurnTimelineMessageRow: View {
     let message: CodexMessage
+    let currentWorkingDirectory: String?
     let isRetryAvailable: Bool
     let cachedBlockInfoByMessageID: [String: AssistantBlockAccessoryState]
     let planSessionSource: CodexPlanSessionSource?
@@ -151,6 +152,7 @@ private struct TurnTimelineMessageRow: View {
             allowsAssistantPlanFallbackRecovery: allowsAssistantPlanFallbackRecovery,
             assistantTurnCompleted: message.turnId.map(completedTurnIDs.contains) ?? false,
             threadMessagesForPlanMatching: threadMessagesForPlanMatching,
+            currentWorkingDirectory: currentWorkingDirectory,
             planMatchingFingerprint: planMatchingFingerprint,
             showsStreamingAnimations: autoScrollMode == .followBottom
                 && message.id == newestStreamingMessageID,
@@ -164,6 +166,7 @@ private struct TurnTimelineMessageRow: View {
 
 private struct TurnTimelineToolBurstView: View {
     let group: TurnTimelineToolBurstGroup
+    let currentWorkingDirectory: String?
     let isRetryAvailable: Bool
     let cachedBlockInfoByMessageID: [String: AssistantBlockAccessoryState]
     let planSessionSource: CodexPlanSessionSource?
@@ -192,6 +195,7 @@ private struct TurnTimelineToolBurstView: View {
             ForEach(group.pinnedMessages) { message in
                 TurnTimelineMessageRow(
                     message: message,
+                    currentWorkingDirectory: currentWorkingDirectory,
                     isRetryAvailable: isRetryAvailable,
                     cachedBlockInfoByMessageID: cachedBlockInfoByMessageID,
                     planSessionSource: planSessionSource,
@@ -238,6 +242,7 @@ private struct TurnTimelineToolBurstView: View {
                 ForEach(group.overflowMessages) { message in
                     TurnTimelineMessageRow(
                         message: message,
+                        currentWorkingDirectory: currentWorkingDirectory,
                         isRetryAvailable: isRetryAvailable,
                         cachedBlockInfoByMessageID: cachedBlockInfoByMessageID,
                         planSessionSource: planSessionSource,
@@ -260,7 +265,10 @@ private struct TurnTimelineToolBurstView: View {
 private struct TurnTimelineRowsSection: View {
     let shouldWarmRecentTailProgressively: Bool
     let hasEarlierMessages: Bool
+    let isLoadingEarlierMessages: Bool
+    let earlierMessagesButtonTitle: String
     let visibleMessages: ArraySlice<CodexMessage>
+    let currentWorkingDirectory: String?
     let isRetryAvailable: Bool
     let cachedBlockInfoByMessageID: [String: AssistantBlockAccessoryState]
     let planSessionSource: CodexPlanSessionSource?
@@ -293,13 +301,20 @@ private struct TurnTimelineRowsSection: View {
 
         if hasEarlierMessages {
             Button(action: onLoadEarlierMessages) {
-                Text(L("Load earlier messages", "加载更早消息"))
-                    .font(AppFont.subheadline())
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
+                HStack(spacing: 8) {
+                    if isLoadingEarlierMessages {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    Text(earlierMessagesButtonTitle)
+                }
+                .font(AppFont.subheadline())
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
             }
             .buttonStyle(.plain)
+            .disabled(isLoadingEarlierMessages)
         }
 
         ForEach(renderItems) { item in
@@ -307,6 +322,7 @@ private struct TurnTimelineRowsSection: View {
             case .message(let message):
                 TurnTimelineMessageRow(
                     message: message,
+                    currentWorkingDirectory: currentWorkingDirectory,
                     isRetryAvailable: isRetryAvailable,
                     cachedBlockInfoByMessageID: cachedBlockInfoByMessageID,
                     planSessionSource: planSessionSource,
@@ -323,6 +339,7 @@ private struct TurnTimelineRowsSection: View {
             case .toolBurst(let group):
                 TurnTimelineToolBurstView(
                     group: group,
+                    currentWorkingDirectory: currentWorkingDirectory,
                     isRetryAvailable: isRetryAvailable,
                     cachedBlockInfoByMessageID: cachedBlockInfoByMessageID,
                     planSessionSource: planSessionSource,
@@ -397,12 +414,16 @@ struct TurnTimelineView<EmptyState: View, Composer: View>: View {
     let activeTurnID: String?
     let isThreadRunning: Bool
     let latestTurnTerminalState: CodexTurnTerminalState?
+    let currentWorkingDirectory: String?
     let completedTurnIDs: Set<String>
     let stoppedTurnIDs: Set<String>
     let assistantRevertStatesByMessageID: [String: AssistantRevertPresentation]
     let planSessionSource: CodexPlanSessionSource?
     let allowsAssistantPlanFallbackRecovery: Bool
     let threadMessagesForPlanMatching: [CodexMessage]
+    let canLoadRemoteOlderMessages: Bool
+    let isLoadingRemoteOlderMessages: Bool
+    let remoteOlderMessagesError: String?
     let isRetryAvailable: Bool
     let errorMessage: String?
     let hidesErrorMessage: Bool
@@ -412,6 +433,7 @@ struct TurnTimelineView<EmptyState: View, Composer: View>: View {
     let isComposerFocused: Bool
     let isComposerAutocompletePresented: Bool
 
+    let onLoadEarlierMessages: () -> Void
     let onRetryUserMessage: (String) -> Void
     let onTapAssistantRevert: (CodexMessage) -> Void
     let onTapSubagent: (CodexSubagentThreadPresentation) -> Void
@@ -453,7 +475,21 @@ struct TurnTimelineView<EmptyState: View, Composer: View>: View {
     }
 
     private var hasEarlierMessages: Bool {
-        visibleTailCount < messages.count
+        visibleTailCount < messages.count || canLoadRemoteOlderMessages || remoteOlderMessagesError != nil
+    }
+
+    private var isLoadingEarlierMessages: Bool {
+        isLoadingRemoteOlderMessages
+    }
+
+    private var earlierMessagesButtonTitle: String {
+        if isLoadingEarlierMessages {
+            return L("Loading earlier messages...", "正在加载更早消息...")
+        }
+        if remoteOlderMessagesError != nil {
+            return L("Retry loading earlier messages", "重试加载更早消息")
+        }
+        return L("Load earlier messages", "加载更早消息")
     }
 
     private var shouldWarmRecentTailProgressively: Bool {
@@ -529,7 +565,10 @@ struct TurnTimelineView<EmptyState: View, Composer: View>: View {
                         TurnTimelineRowsSection(
                             shouldWarmRecentTailProgressively: shouldWarmRecentTailProgressively,
                             hasEarlierMessages: hasEarlierMessages,
+                            isLoadingEarlierMessages: isLoadingEarlierMessages,
+                            earlierMessagesButtonTitle: earlierMessagesButtonTitle,
                             visibleMessages: visibleMessages,
+                            currentWorkingDirectory: currentWorkingDirectory,
                             isRetryAvailable: isRetryAvailable,
                             cachedBlockInfoByMessageID: cachedBlockInfoByMessageID,
                             planSessionSource: planSessionSource,
@@ -790,6 +829,10 @@ struct TurnTimelineView<EmptyState: View, Composer: View>: View {
     }
 
     private func handleLoadEarlierMessages() {
+        if visibleTailCount >= messages.count {
+            onLoadEarlierMessages()
+            return
+        }
         progressiveTailRevealTask?.cancel()
         progressiveTailRevealTask = nil
         isProgressivelyRevealingRecentTail = false

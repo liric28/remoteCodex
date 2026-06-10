@@ -40,6 +40,7 @@ security_best_practices_report.md
 
 # Temp files
 $TMP_PLACEHOLDER
+.codex-local/
 
 # Claude project config (local only)
 .claude/

@@ -13,12 +13,16 @@ struct TurnConversationContainerView: View {
     let activeTurnID: String?
     let isThreadRunning: Bool
     let latestTurnTerminalState: CodexTurnTerminalState?
+    let currentWorkingDirectory: String?
     let completedTurnIDs: Set<String>
     let stoppedTurnIDs: Set<String>
     let assistantRevertStatesByMessageID: [String: AssistantRevertPresentation]
     let planSessionSource: CodexPlanSessionSource?
     let allowsAssistantPlanFallbackRecovery: Bool
     let threadMessagesForPlanMatching: [CodexMessage]
+    let canLoadRemoteOlderMessages: Bool
+    let isLoadingRemoteOlderMessages: Bool
+    let remoteOlderMessagesError: String?
     let errorMessage: String?
     let composerRecoveryAccessory: AnyView?
     let shouldAnchorToAssistantResponse: Binding<Bool>
@@ -32,6 +36,7 @@ struct TurnConversationContainerView: View {
     let usageToastOverlay: AnyView
     let isRepositoryLoadingToastVisible: Bool
     let onRetryUserMessage: (String) -> Void
+    let onLoadOlderMessages: () -> Void
     let onTapAssistantRevert: (CodexMessage) -> Void
     let onTapSubagent: (CodexSubagentThreadPresentation) -> Void
     let onTapOutsideComposer: () -> Void
@@ -90,12 +95,16 @@ struct TurnConversationContainerView: View {
                 activeTurnID: activeTurnID,
                 isThreadRunning: isThreadRunning,
                 latestTurnTerminalState: latestTurnTerminalState,
+                currentWorkingDirectory: currentWorkingDirectory,
                 completedTurnIDs: completedTurnIDs,
                 stoppedTurnIDs: stoppedTurnIDs,
                 assistantRevertStatesByMessageID: assistantRevertStatesByMessageID,
                 planSessionSource: planSessionSource,
                 allowsAssistantPlanFallbackRecovery: allowsAssistantPlanFallbackRecovery,
                 threadMessagesForPlanMatching: threadMessagesForPlanMatching,
+                canLoadRemoteOlderMessages: canLoadRemoteOlderMessages,
+                isLoadingRemoteOlderMessages: isLoadingRemoteOlderMessages,
+                remoteOlderMessagesError: remoteOlderMessagesError,
                 isRetryAvailable: !isThreadRunning,
                 errorMessage: errorMessage,
                 hidesErrorMessage: composerRecoveryAccessory != nil,
@@ -103,6 +112,7 @@ struct TurnConversationContainerView: View {
                 isScrolledToBottom: isScrolledToBottom,
                 isComposerFocused: isComposerFocused,
                 isComposerAutocompletePresented: isComposerAutocompletePresented,
+                onLoadEarlierMessages: onLoadOlderMessages,
                 onRetryUserMessage: onRetryUserMessage,
                 onTapAssistantRevert: onTapAssistantRevert,
                 onTapSubagent: onTapSubagent,
