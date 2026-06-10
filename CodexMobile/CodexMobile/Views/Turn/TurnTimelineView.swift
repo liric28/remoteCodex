@@ -535,7 +535,6 @@ struct TurnTimelineView<EmptyState: View, Composer: View>: View {
                 emptyTimelineState
                     .frame(
                         width: max(proxy.size.width - (timelineHorizontalPadding * 2), 0),
-                        height: proxy.size.height,
                         alignment: .center
                     )
                     .padding(.horizontal, timelineHorizontalPadding)
